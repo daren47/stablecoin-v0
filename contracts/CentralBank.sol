@@ -8,7 +8,6 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import "hardhat/console.sol";
 
 // Uniswap V4 - Core
 import {IPoolManager, ModifyLiquidityParams} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -152,7 +151,7 @@ contract CentralBank is ReentrancyGuard, Ownable {
 
     // Reference implementation uses tBTC as collateral.
     // The protocol is collateral-agnostic; production collateral is intended
-    // to be GENIUS-compliant, low-volatility tokenized U.S. Treasuries.
+    // to be GENIUS-compliant, low-volatility tokenized U.S. T-bills.
     address internal constant DEMO_COLLATERAL_ASSET_ADDRESS = 0x18084fbA666a33d37592fA2633fD49a74DD93a88;
     IPoolManager public constant POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
     IPositionManager public constant POSITION_MANAGER = IPositionManager(0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e);
@@ -196,9 +195,9 @@ contract CentralBank is ReentrancyGuard, Ownable {
     // invariant: targetCollateralRatioBps >= MIN_TARGET_COLLATERAL_RATIO_BPS
     uint256 public targetCollateralRatioBps = 15000;
 
-    // the protocol burns stablecoinBurnRatioBps of yield generated from protocol
-    // owned liquidity, in order to improve collateral ratio.
-    // this value can be adjusted freely by whoever is operating the protocol.
+    // the protocol burns stablecoinBurnRatioBps of yield generated from
+    // protocol-owned liquidity, in order to improve collateral ratio.
+    // this value can be adjusted via setter function by protocol owner.
     // invariant: stablecoinBurnRatioBps <= BPS_DENOMINATOR
     uint256 public stablecoinBurnRatioBps = 5000;
 
@@ -280,6 +279,10 @@ contract CentralBank is ReentrancyGuard, Ownable {
         uint256 memecoinMinted
     );
 
+    // --------------------
+    // Protocol initialization
+    // --------------------
+
     constructor() Ownable(msg.sender) {
         collateralAsset = IERC20(DEMO_COLLATERAL_ASSET_ADDRESS);
         stablecoin = new CentralBankERC20(address(this), "MONA", "MONA");
@@ -294,11 +297,6 @@ contract CentralBank is ReentrancyGuard, Ownable {
         approveAll();
     }
 
-    // make all approvals necessary for protocol to function.
-    // separating this into a publicly callable function so that if we ever ran into
-    // a situation where the "max" approvals given at deployment time "run out" (say,
-    // 30 years down the line), everything can be re-approved and the protocol continues
-    // to function.
     function approveAll() public {
         Uni4All.approveRouter(address(bankShare));
         Uni4All.approveRouter(address(stablecoin));
@@ -332,6 +330,70 @@ contract CentralBank is ReentrancyGuard, Ownable {
         poolInitialized = true;
         emit LiquidityPoolInitialized();
     }
+
+    // --------------------
+    // Mint / Redeem
+    // --------------------
+
+    function mintStablecoin(
+        uint256 amountToMint,
+        uint256 maxAmountIn,
+        uint256 deadline
+    )
+        external
+        nonReentrant
+        returns (uint256) 
+    {
+        require(amountToMint > 0, "Amount must be > 0");
+        require(block.timestamp <= deadline, "Expired");
+
+        // round up
+        uint256 amountToDeposit = Math.mulDiv(amountToMint, DECIMALS, getPrice(), Math.Rounding.Ceil);
+        require(amountToDeposit <= maxAmountIn, "Oracle/slippage");
+
+        // pull exactly that much collateral
+        collateralAsset.safeTransferFrom(msg.sender, address(this), amountToDeposit);
+
+        // apply minting fee
+        amountToMint = Math.mulDiv(amountToMint, BPS_DENOMINATOR - mintFeeBps, BPS_DENOMINATOR);
+        stablecoin.mint(msg.sender, amountToMint);
+
+        emit StablecoinMinted(msg.sender, amountToDeposit, amountToMint);
+        return amountToMint;
+    }
+
+    function redeemStablecoin(
+        uint256 amountToRedeem,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) 
+        public
+        nonReentrant
+        returns (uint256) 
+    {
+        require(amountToRedeem > 0, "Amount must be > 0");
+        require(block.timestamp <= deadline, "Expired");
+
+        // Round down
+        uint256 withdrawalAmount = Math.mulDiv(amountToRedeem, DECIMALS, getPrice(), Math.Rounding.Floor);
+
+        // apply redemption fee
+        withdrawalAmount = Math.mulDiv(withdrawalAmount, BPS_DENOMINATOR - redemptionFeeBps, BPS_DENOMINATOR);
+        require(withdrawalAmount >= minAmountOut, "Oracle/slippage");
+
+        stablecoin.safeTransferFrom(msg.sender, address(this), amountToRedeem);
+
+        _burnStablecoin(amountToRedeem, BurnReason.Redemption);
+
+        collateralAsset.safeTransfer(msg.sender, withdrawalAmount);
+
+        emit StablecoinRedeemed(msg.sender, amountToRedeem, withdrawalAmount);
+        return withdrawalAmount;
+    }
+
+    // --------------------
+    // Rewards / Policy
+    // --------------------
 
     function harvestFees() external nonReentrant {
         uint256 stablecoinBalanceBeforeHarvest = stablecoin.balanceOf(address(this));
@@ -429,70 +491,12 @@ contract CentralBank is ReentrancyGuard, Ownable {
         );
     }
 
-    function mintStablecoin(
-        uint256 amountToMint,
-        uint256 maxAmountIn,
-        uint256 deadline
-    )
-        external
-        nonReentrant
-        returns (uint256) 
-    {
-        require(amountToMint > 0, "Amount must be > 0");
-        require(block.timestamp <= deadline, "Expired");
-
-        // round up
-        uint256 amountToDeposit = Math.mulDiv(amountToMint, DECIMALS, getPrice(), Math.Rounding.Ceil);
-        require(amountToDeposit <= maxAmountIn, "Oracle/slippage");
-
-        // pull exactly that much collateral
-        collateralAsset.safeTransferFrom(msg.sender, address(this), amountToDeposit);
-
-        // apply minting fee
-        amountToMint = Math.mulDiv(amountToMint, BPS_DENOMINATOR - mintFeeBps, BPS_DENOMINATOR);
-        stablecoin.mint(msg.sender, amountToMint);
-
-        emit StablecoinMinted(msg.sender, amountToDeposit, amountToMint);
-        return amountToMint;
-    }
-
-    function redeemStablecoin(
-        uint256 amountToRedeem,
-        uint256 minAmountOut,
-        uint256 deadline
-    ) 
-        public
-        nonReentrant
-        returns (uint256) 
-    {
-        require(amountToRedeem > 0, "Amount must be > 0");
-        require(block.timestamp <= deadline, "Expired");
-
-        // Round down
-        uint256 withdrawalAmount = Math.mulDiv(amountToRedeem, DECIMALS, getPrice(), Math.Rounding.Floor);
-
-        // apply redemption fee
-        withdrawalAmount = Math.mulDiv(withdrawalAmount, BPS_DENOMINATOR - redemptionFeeBps, BPS_DENOMINATOR);
-        require(withdrawalAmount >= minAmountOut, "Oracle/slippage");
-
-        stablecoin.safeTransferFrom(msg.sender, address(this), amountToRedeem);
-
-        _burnStablecoin(amountToRedeem, BurnReason.Redemption);
-
-        collateralAsset.safeTransfer(msg.sender, withdrawalAmount);
-
-        emit StablecoinRedeemed(msg.sender, amountToRedeem, withdrawalAmount);
-        return withdrawalAmount;
-    }
-
-    // "donate" stablecoin to stakers.
-    // why would anyone want to *donate* to stakers?
-    // well..they wouldn't, unless they happened to be the ones running the protocol.
-    // More concretely: whatever front-end you're running should be taking fees and
-    // donating them to stakers. I imagine a front-end convenience fee on stablecoin
-    // minting/redemption, and a yield vault that takes a management fee and distributes
-    // to stakers. And then you can get crazy with it: make a crypto game that donates
-    // proceeds, or a leaderboard for who's donated the most. The sky's the limit.
+    /**
+     * @notice Donate stablecoin to protocol stakers.
+     * @dev Intended primarily for protocol-controlled revenue sources (e.g. frontend
+     *      fees, vault management fees, or other protocol income). Donated funds are
+     *      partially burned according to policy and the remainder distributed to stakers.
+     */
     function donate(uint256 amount) external nonReentrant {
         require(amount > 0, "Amount must be > 0");
 
@@ -642,7 +646,7 @@ contract CentralBank is ReentrancyGuard, Ownable {
     }
 
     // --------------------
-    // Pure functions
+    // Pure helpers
     // --------------------
 
     function abs(int256 x) public pure returns (int256) {
@@ -764,14 +768,16 @@ contract PoolHooks is BaseHook {
         });
     }
 
-    /// @notice Enforces that only the protocol can provide liquidity to this pool
-    /// @dev Since Uniswap v4 hooks cannot access the original caller (msg.sender is always
-    ///      the PoolManager), we enforce exclusivity by requiring liquidity == 0 before adding.
-    ///      This works because:
-    ///      1. The protocol atomically initializes the pool and adds the first liquidity position
-    ///      2. When rebalancing, the protocol removes ALL liquidity and re-adds it in the same transaction
-    ///      3. No external party can front-run or insert liquidity during these atomic operations
-    ///      4. Therefore, liquidity will only be zero when the protocol is adding/rebalancing
+    /**
+     * @notice Enforces that only the protocol can provide liquidity to this pool
+     * @dev Since Uniswap v4 hooks cannot access the original caller (msg.sender is always
+     *      the PoolManager), we enforce exclusivity by requiring liquidity == 0 before adding.
+     *      This works because:
+     *      1. The protocol atomically initializes the pool and adds the first liquidity position
+     *      2. When rebalancing, the protocol removes ALL liquidity and re-adds it in the same transaction
+     *      3. No external party can front-run or insert liquidity during these atomic operations
+     *      4. Therefore, liquidity will only be zero when the protocol is adding/rebalancing
+     */
     function _beforeAddLiquidity(
         address,
         PoolKey calldata key,
