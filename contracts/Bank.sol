@@ -29,19 +29,19 @@ import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {Uni4All} from "./Uni4All.sol";
 import {OracleLib} from "./OracleLib.sol";
 
-contract CentralBankERC20 is ERC20 {
-    address internal immutable centralBank;
+contract BankERC20 is ERC20 {
+    address internal immutable bank;
 
     constructor(
-        address centralBankAddress,
+        address bankAddress,
         string memory name_,
         string memory symbol_
     ) ERC20(name_, symbol_) {
-        centralBank = centralBankAddress;
+        bank = bankAddress;
     }
 
     function mint(address to, uint256 amount) external {
-        require(msg.sender == centralBank, "Forbidden");
+        require(msg.sender == bank, "Forbidden");
         _mint(to, amount);
     }
 
@@ -55,9 +55,9 @@ contract CentralBankERC20 is ERC20 {
 }
 
 /// @notice The Central Bank of MONA. Mints and redeems stablecoins, manages system liquidity.
-contract CentralBank is ReentrancyGuard, Ownable {
+contract Bank is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
-    using SafeERC20 for CentralBankERC20;
+    using SafeERC20 for BankERC20;
     using PositionInfoLibrary for *;
     using OracleLib for *;
     using Uni4All for *;
@@ -80,9 +80,9 @@ contract CentralBank is ReentrancyGuard, Ownable {
     // --------------------
 
     IERC20 private immutable collateralAsset;
-    CentralBankERC20 public immutable bankShare;
-    CentralBankERC20 public immutable stablecoin;
-    CentralBankERC20 public immutable memecoin;
+    BankERC20 public immutable bankShare;
+    BankERC20 public immutable stablecoin;
+    BankERC20 public immutable memecoin;
 
     // --------------------
     // System parameters
@@ -204,9 +204,9 @@ contract CentralBank is ReentrancyGuard, Ownable {
 
     constructor() Ownable(msg.sender) {
         collateralAsset = IERC20(DEMO_COLLATERAL_ASSET_ADDRESS);
-        stablecoin = new CentralBankERC20(address(this), "MONA", "MONA");
-        bankShare = new CentralBankERC20(address(this), "LISA", "LISA");
-        memecoin = new CentralBankERC20(address(this), "MEME", "MEME");
+        stablecoin = new BankERC20(address(this), "MONA", "MONA");
+        bankShare = new BankERC20(address(this), "LISA", "LISA");
+        memecoin = new BankERC20(address(this), "MEME", "MEME");
         stakingVault = new StakingVault(address(this), stablecoin, bankShare);
 
         // These are the only bank shares that will ever be minted.
@@ -587,15 +587,15 @@ contract StakingVault is ReentrancyGuard {
     IERC20 internal immutable stablecoin;
     IERC20 internal immutable bankShare;
 
-    address internal immutable centralBank;
+    address internal immutable bank;
 
     event Claimed(address indexed user, uint256 reward);
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount);
     event Deposited(address indexed from, uint256 amount, uint256 rewardPerShare);
 
-    constructor(address _centralBank, IERC20 _stablecoin, IERC20 _bankShare) {
-        centralBank = _centralBank;
+    constructor(address _bank, IERC20 _stablecoin, IERC20 _bankShare) {
+        bank = _bank;
         stablecoin = _stablecoin;
         bankShare = _bankShare;
     }

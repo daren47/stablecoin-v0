@@ -114,19 +114,19 @@ async function main() {
     const swapHelper = await SwapHelper.deploy();
     await swapHelper.waitForDeployment();
 
-    const CentralBank = await ethers.getContractFactory("CentralBank");
-    const bank = await CentralBank.deploy();
+    const Bank = await ethers.getContractFactory("Bank");
+    const bank = await Bank.deploy();
     await bank.waitForDeployment();
     const bankAddress = await bank.getAddress();
     row("bank address:", bankAddress);
 
     const stablecoinAddress = await bank.stablecoin();
-    let tmp = await ethers.getContractFactory("CentralBankERC20");
+    let tmp = await ethers.getContractFactory("BankERC20");
     const stablecoin = tmp.attach(stablecoinAddress);
     row("stablecoin address:", stablecoinAddress);
 
     const bankShareAddress = await bank.bankShare();
-    tmp = await ethers.getContractFactory("CentralBankERC20");
+    tmp = await ethers.getContractFactory("BankERC20");
     const bankShare = tmp.attach(bankShareAddress);
     row("bankShare address:", bankShareAddress);
 
