@@ -286,7 +286,7 @@ contract CentralBank is ReentrancyGuard, Ownable {
         uint256 minAmountOut,
         uint256 deadline
     ) 
-        public
+        external
         nonReentrant
         returns (uint256) 
     {
