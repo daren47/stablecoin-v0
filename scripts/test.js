@@ -1,6 +1,5 @@
 process.env.HARDHAT_LOGGING_LEVEL = "error";
 
-const fs = require("fs");
 const { ethers, network } = require("hardhat");
 const { MaxUint256 } = require("ethers");
 
