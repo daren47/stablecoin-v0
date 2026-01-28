@@ -360,7 +360,7 @@ contract Bank is ReentrancyGuard, Ownable {
 
         uint256 stablecoinHarvested = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;
         uint256 callerReward = Math.mulDiv(stablecoinHarvested, callerRewardBps, BPS_DENOMINATOR);
-        uint256 amountToBurn = Math.mulDiv(stablecoinHarvested, burnRatioToApplyBps, BPS_DENOMINATOR);
+        uint256 amountToBurn = Math.mulDiv(stablecoinHarvested, burnRatioToApplyBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
         uint256 amountToDistribute = stablecoinHarvested - callerReward - amountToBurn;
         // amountToBurn = stablecoinHarvested - callerReward - amountToDistribute
 
@@ -425,7 +425,7 @@ contract Bank is ReentrancyGuard, Ownable {
         // otherwise, burn by stablecoinBurnRatioBps
         uint256 amountToBurn = amount;
         if (stakingVault.totalStaked() > 0) {
-            amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR);
+            amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
         }
         uint256 amountToDeposit = amount - amountToBurn;
 
