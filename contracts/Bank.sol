@@ -487,24 +487,22 @@ contract Bank is ReentrancyGuard, Ownable {
     }
 
     function redeemableStablecoinSupply() public view returns (uint256) {
-        // At deployment, TOTAL_SHARE_SUPPLY stablecoin is minted into the liquidity pool.
-        // These tokens cannot be redeemed for collateral because they're structurally locked:
-        // extracting them requires bankShare tokens, but all bankShare are also in the pool.
+        // At deployment, TOTAL_SHARE_SUPPLY stablecoin and TOTAL_SHARE_SUPPLY bankShare are minted 1:1
+        // and deposited into the stablecoin/bankShare liquidity pool at a 1:1 price. No additional
+        // bankShare will ever be minted; stablecoin are minted by depositing collateral via mintStablecoin().
         //
-        // This deadlock breaks when users deposit collateral and mint NEW stablecoin, which they
-        // use to buy bankShare from the pool. Once trading begins, the protocol harvests the initial
-        // stablecoins out as LP fees and either distributes them to stakers/callers of harvestFees()
-        // or burns them (to improve collateral ratio). Only distributed tokens enter circulation.
+        // The initial stablecoin tokens cannot be redeemed for collateral because they're structurally locked:
+        // extracting them requires bankShare tokens, but all bankShare are also in the pool, and no more
+        // will ever be minted.
         //
-        // Redeemable supply = stablecoin that can be redeemed for collateral:
-        return stablecoin.totalSupply() - TOTAL_SHARE_SUPPLY + Math.min(TOTAL_SHARE_SUPPLY, totalRealizedHarvest);
+        // To acquire bankShare, one must first mint stablecoin via mintStablecoin(), and then use that
+        // stablecoin to buy bankShare from the liquidity pool. When they later sell bankShare back
+        // into the pool, the stablecoin they receive is the stablecoin they used to buy the bankShare
+        // (due to AMM math). The initial TOTAL_SHARE_SUPPLY stablecoin remains locked.
         //
-        // Breakdown:
-        // - Start with total supply (all stablecoin ever minted)
-        // - Subtract TOTAL_SHARE_SUPPLY (initial locked amount)
-        // - Add back distributed amount (harvested tokens that entered circulation, not burned ones)
-        //
-        // Eventually converges to totalSupply() once all initial tokens are distributed.
+        // Note: AMM rounding and fee settlement can leave tiny amounts of stablecoin "locked" in the pool.
+        // This approximation is intentionally conservative.
+        return stablecoin.totalSupply() - TOTAL_SHARE_SUPPLY;
     }
 
     function getPositionInfo() external view returns (int24 tickLower, int24 tickUpper, uint128 liquidity) {
