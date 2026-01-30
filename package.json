@@ -8,7 +8,8 @@
     "clean": "hardhat clean",
     "build-docker": "sh scripts/build-docker.sh",
     "anvil": "sh scripts/run-anvil.sh",
-    "test": "hardhat run scripts/test.js --network anvil"
+    "test": "hardhat run scripts/test.js --network anvil",
+    "phantom-liquidity": "hardhat run scripts/phantom-liquidity-test.js --network anvil"
   },
   "author": "daren47",
   "license": "MIT",

@@ -90,7 +90,11 @@ function expect(bool, passMsg, failMsg) {
 }
 
 function testResults() {
-    return [checks, passed, failed];
+    if (passed == checks) {
+        console.log("[pass] " + passed + "/" + checks + " tests passed");
+    } else {
+        console.log("[fail] " + passed + "/" + checks + " tests passed");
+    }
 }
 
 async function resetHardhat() {
@@ -289,6 +293,7 @@ async function deployContracts() {
 module.exports = {
   expect,
   testResults,
+  fmt,
   row,
   deltaRow,
   resetHardhat,

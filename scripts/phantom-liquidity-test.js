@@ -1,8 +1,22 @@
-const { expect, testResults, row, deltaRow, resetHardhat,
+const { expect, testResults, fmt, row, deltaRow, resetHardhat,
   deployContracts, doSwap, POOL_MANAGER } = require("./test-utils.js");
 
 const { ethers } = require("hardhat");
 const { MaxUint256 } = require("ethers");
+
+const raw = process.env.BURNRATE || "5000";
+
+const burnRate = Number.parseInt(raw, 10);
+if (!Number.isFinite(burnRate) || String(burnRate) !== raw || burnRate < 0 || burnRate > 10000) {
+  console.error(`Invalid integer argument: ${raw}`);
+  process.exit(1);
+}
+
+console.log("Running phantom liquidity test with burn rate (basis points):", burnRate);
+console.log("");
+console.log("To set burn rate, run this test with:");
+console.log("  BURNRATE=<N> npm run phantom-liquidity");
+console.log("where N is burn rate in basis points (0->10000)\n");
 
 async function main() {
   await resetHardhat();
@@ -127,25 +141,14 @@ async function main() {
   )
   console.log("");
 
-  console.log("[set] burn rate to 100%");
+  console.log("[set] burn rate to " + burnRate + " basis points");
   let burnRateBefore = await bank.stablecoinBurnRatioBps();
-  tx = await bank.setStablecoinBurnRatio(10000);
+  tx = await bank.setStablecoinBurnRatio(burnRate);
   await tx.wait();
   let burnRateAfter = await bank.stablecoinBurnRatioBps();
   deltaRow("burn rate (bps):", burnRateBefore, burnRateAfter, false);
-  expect(burnRateAfter == 10000, "burn rate set", "");
+  expect(burnRateAfter == burnRate, "burn rate set", "");
   console.log("");
-
-  /*
-  console.log("[set] caller reward to 0%");
-  let callerRewardBefore = await bank.callerRewardBps();
-  tx = await bank.setCallerReward(0);
-  await tx.wait();
-  let callerRewardAfter = await bank.callerRewardBps();
-  deltaRow("burn rate (bps):", callerRewardBefore, callerRewardAfter, false);
-  expect(callerRewardAfter == 0, "caller reward set", "");
-  console.log("");
-  */
 
   console.log("[harvest] alice calls harvestFees()");
   stablecoinSupplyBefore = await stablecoin.totalSupply();
@@ -176,27 +179,36 @@ async function main() {
   deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
   deltaRow("collateral ratio (bps):", collateralRatioBefore, collateralRatioAfter, false);
   expect(
-    stablecoinSupplyAfter < stablecoinSupplyBefore &&
-    stakingVaultStablecoinAfter == stakingVaultStablecoinBefore,
-    "no fees to vault; stablecoin burned",
+    collateralRatioAfter >= collateralRatioBefore,
+    "collateral after >= collateral before",
     ""
   )
   console.log("");
 
   console.log("[unstake] alice unstakes all her bankShare");
+  let totalStakedBefore = await stakingVault.totalStaked();
   stakingVaultBankShareBefore = await bankShare.balanceOf(stakingVaultAddress);
+  stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
   aliceBankShareBefore = await bankShare.balanceOf(aliceAddress);
+  aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
   tx = await stakingVault.connect(alice).unstake(stakingVaultBankShareBefore);
   await tx.wait();
-  stakingVaultBankShareAfter = await bankShare.balanceOf(stakingVaultAddress);
-  aliceBankShareAfter = await bankShare.balanceOf(aliceAddress);
   totalStakedAfter = await stakingVault.totalStaked();
+  stakingVaultBankShareAfter = await bankShare.balanceOf(stakingVaultAddress);
+  stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+  aliceBankShareAfter = await bankShare.balanceOf(aliceAddress);
+  aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
+  deltaRow("total staked:", totalStakedBefore, totalStakedAfter);
   deltaRow("alice bankShare:", aliceBankShareBefore, aliceBankShareAfter);
+  deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
   deltaRow("staking vault bankShare:", stakingVaultBankShareBefore, stakingVaultBankShareAfter);
+  deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
   expect(
     aliceBankShareAfter > aliceBankShareBefore &&
-    stakingVaultBankShareAfter < stakingVaultBankShareBefore,
-    "deltas ok (alice +bankShare, staking vault -bankShare)",
+    aliceStablecoinAfter >= aliceStablecoinBefore &&
+    stakingVaultBankShareAfter < stakingVaultBankShareBefore &&
+    stakingVaultStablecoinAfter <= stakingVaultStablecoinBefore,
+    "bankShare and accumulated stablecoin (if any) removed from staking vault and sent to alice",
     "unexpected deltas"
   )
   console.log("")
@@ -229,7 +241,7 @@ async function main() {
   )
   console.log();
 
-  console.log("[harvest] alice calls harvestFees()");
+  console.log("[harvest] alice calls harvestFees(); nothing is staked so fees should all be burned");
   stablecoinSupplyBefore = await stablecoin.totalSupply();
   redeemableSupplyBefore = await bank.redeemableStablecoinSupply();
   collateralRatioBefore = await bank.collateralRatio();
@@ -273,7 +285,8 @@ async function main() {
   poolStablecoinBefore = await stablecoin.balanceOf(POOL_MANAGER);
   poolBankShareBefore = await bankShare.balanceOf(POOL_MANAGER);
   collateralRatioBefore = await bank.collateralRatio();
-  let collateralBefore = await bank.valueOfCollateral();
+  let valueOfCollateralBefore = await bank.valueOfCollateral();
+  let collateralBefore = await tbtc.balanceOf(bankAddress);
   tx = await bank.connect(alice).redeemStablecoin(aliceStablecoinBefore, 0, MaxUint256);
   await tx.wait();
   aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
@@ -283,14 +296,26 @@ async function main() {
   poolStablecoinAfter = await stablecoin.balanceOf(POOL_MANAGER);
   poolBankShareAfter = await bankShare.balanceOf(POOL_MANAGER);
   collateralRatioAfter = await bank.collateralRatio();
-  let collateralAfter = await bank.valueOfCollateral();
-  deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
+  let valueOfCollateralAfter = await bank.valueOfCollateral();
+  let collateralAfter = await tbtc.balanceOf(bankAddress);
+  let initialStablecoinSupply = await bank.TOTAL_SHARE_SUPPLY();
+  row("initial stablecoin supply:", fmt(initialStablecoinSupply));
+  deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
   deltaRow("pool stablecoin:", poolStablecoinBefore, poolStablecoinAfter);
   deltaRow("pool bank share:", poolBankShareBefore, poolBankShareAfter);
-  deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
-  deltaRow("collateral value:", collateralBefore, collateralAfter);
+  deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
+  deltaRow("alice tBTC:", aliceTbtcBefore, aliceTbtcAfter);
+  deltaRow("collateral value (tbtc):", collateralBefore, collateralAfter);
+  deltaRow("collateral value (usd):", valueOfCollateralBefore, valueOfCollateralAfter);
   deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
   deltaRow("collateral ratio:", collateralRatioBefore, collateralRatioAfter, false);
+  expect(poolStablecoinAfter >= initialStablecoinSupply,
+      "initial liquidity still locked",
+      "initial liquidity removed from pool"
+  );
+  console.log("");
+
+  testResults();
 
 }
 
