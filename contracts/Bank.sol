@@ -482,7 +482,7 @@ contract Bank is ReentrancyGuard, Ownable {
         );
     }
 
-    function returnStablecoinToBank(uint256 amount) external {
+    function returnStablecoinToBank(uint256 amount) external nonReentrant {
         require(amount > 0, "amount must be > 0");
         require(msg.sender == address(treasuryVault), "only treasury vault can return to bank");
 
