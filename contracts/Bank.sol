@@ -120,6 +120,18 @@ contract Bank is ReentrancyGuard, Ownable {
     // invariant: stablecoinBurnRatioBps <= BPS_DENOMINATOR
     uint256 public stablecoinBurnRatioBps = 5000;
 
+    // the protocol redirects treasuryAllocationBps of protocol earnings
+    // (both from protocol-owned liquidity and from appreciation of underlying
+    // collateral) to the TreasuryVault.
+    // The TreasuryVault can:
+    //   1) send funds back to the bank (to be burned or distributed to stakers)
+    //   2) use funds to provide liquidity to pools on uniswap/curve/etc,
+    //      increasing the amount of on-chain protocol-owned liquidity.
+    // The TreasuryVault cannot send funds to the operator of the protocol.
+    uint256 public constant MAX_TREASURY_ALLOCATION_BPS = 5000;
+    // invariant: treasuryAllocationBps <= MAX_TREASURY_ALLOCATION_BPS
+    uint256 public treasuryAllocationBps = 2000;
+
     uint256 public memecoinMultiplier = 1000;
 
     // minting and burning need to charge a small fee to discourage oracle lag arbitrage.
@@ -150,7 +162,6 @@ contract Bank is ReentrancyGuard, Ownable {
 
     uint256 public lastHarvested = 0;
     uint256 public totalHarvested = 0;
-    uint256 public totalRealizedHarvest = 0;
     uint256 public stablecoinBurnedFromRedemption = 0;
     uint256 public stablecoinBurnedByPolicy = 0;
 
@@ -163,10 +174,11 @@ contract Bank is ReentrancyGuard, Ownable {
     PoolKey public poolKey;
 
     // --------------------
-    // Staking vault
+    // Vault
     // --------------------
 
     StakingVault public immutable stakingVault;
+    TreasuryVault internal immutable treasuryVault;
 
     // --------------------
     // Events
@@ -178,11 +190,25 @@ contract Bank is ReentrancyGuard, Ownable {
     event StablecoinBurned(uint256 amount, BurnReason reason);
     event LiquidityRewardsCollected(
         address indexed caller,
-        uint256 stablecoinHarvestedFromPool,
-        uint256 stablecoinMintedForStakers,
-        uint256 stablecoinDistributedToStakers,
-        uint256 stablecoinBurned,
-        uint256 stablecoinDistributedToCaller
+        uint256 amountHarvestedFromPool,
+        uint256 amountMinted,
+        uint256 amountToStakers,
+        uint256 amountToTreasury,
+        uint256 amountBurned,
+        uint256 amountToCaller
+    );
+    event Donation(
+        address indexed donor,
+        uint256 donationAmount,
+        uint256 amountToStakers,
+        uint256 amountToTreasury,
+        uint256 amountBurned,
+        uint256 memecoinMinted
+    );
+    event StablecoinReturnedFromTreasury(
+        uint256 amountReturned,
+        uint256 amountToStakers,
+        uint256 amountBurned
     );
     event TargetCollateralRatioUpdated(address indexed caller, uint256 oldRatioBps, uint256 newRatioBps);
     event StablecoinBurnRatioUpdated(address indexed caller, uint256 oldRatioBps, uint256 newRatioBps);
@@ -190,13 +216,6 @@ contract Bank is ReentrancyGuard, Ownable {
     event MintFeeUpdated(address indexed caller, uint256 oldFeeBps, uint256 newFeeBps);
     event RedemptionFeeUpdated(address indexed caller, uint256 oldFeeBps, uint256 newFeeBps);
     event CallerRewardUpdated(address indexed caller, uint256 oldRewardBps, uint256 newRewardBps);
-    event Donation(
-        address indexed donor,
-        uint256 donationAmount,
-        uint256 stablecoinBurned,
-        uint256 stablecoinDistributed,
-        uint256 memecoinMinted
-    );
 
     // --------------------
     // Protocol initialization
@@ -208,6 +227,7 @@ contract Bank is ReentrancyGuard, Ownable {
         bankShare = new BankERC20(address(this), "LISA", "LISA");
         memecoin = new BankERC20(address(this), "MEME", "MEME");
         stakingVault = new StakingVault(address(this), stablecoin, bankShare);
+        treasuryVault = new TreasuryVault(msg.sender, stablecoin, address(this));
 
         // These are the only bank shares that will ever be minted.
         bankShare.mint(address(this), TOTAL_SHARE_SUPPLY);
@@ -224,6 +244,7 @@ contract Bank is ReentrancyGuard, Ownable {
         Uni4All.approvePositionManager(address(stablecoin));
 
         stablecoin.approve(address(stakingVault), type(uint256).max);
+        stablecoin.approve(address(treasuryVault), type(uint256).max);
     }
 
     function initializeLiquidityPool(address poolHooks) public {
@@ -358,11 +379,10 @@ contract Bank is ReentrancyGuard, Ownable {
             burnRatioToApplyBps = maxBurnRatioBps;
         }
 
-        uint256 stablecoinHarvested = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;
-        uint256 callerReward = Math.mulDiv(stablecoinHarvested, callerRewardBps, BPS_DENOMINATOR);
-        uint256 amountToBurn = Math.mulDiv(stablecoinHarvested, burnRatioToApplyBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
-        uint256 amountToDistribute = stablecoinHarvested - callerReward - amountToBurn;
-        // amountToBurn = stablecoinHarvested - callerReward - amountToDistribute
+        uint256 amountHarvested = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;
+        uint256 callerReward = Math.mulDiv(amountHarvested, callerRewardBps, BPS_DENOMINATOR);
+        uint256 amountToBurn = Math.mulDiv(amountHarvested, burnRatioToApplyBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
+        uint256 amountToStakers = amountHarvested - callerReward - amountToBurn;
 
         // check if the protocol is overcollateralized above targetCollateralRatioBps.
         // if it is, mint stablecoin to bring the collateral ratio down to targetCollateralRatioBps,
@@ -375,20 +395,26 @@ contract Bank is ReentrancyGuard, Ownable {
         uint256 amountToMint = 0;
         if (supplyAtTargetRatio > stablecoinSupply) {
             amountToMint = supplyAtTargetRatio - stablecoinSupply;
-            amountToDistribute += amountToMint;
+            amountToStakers += amountToMint;
         }
 
-        // if nothing is staked, there's nothing to do with harvested stablecoin except burn it.
-        if (amountToDistribute > 0 && stakingVault.totalStaked() == 0) {
-            amountToBurn += amountToDistribute;
-            amountToDistribute = 0;
+        uint256 amountToTreasury = Math.mulDiv(amountToStakers, treasuryAllocationBps, BPS_DENOMINATOR);
+        amountToStakers -= amountToTreasury;
+
+        // if nothing is staked, don't send anything to the staking vault -- burn it instead.
+        if (amountToStakers > 0 && stakingVault.totalStaked() == 0) {
+            amountToBurn += amountToStakers;
+            amountToStakers = 0;
         }
 
         if (amountToMint > 0) {
             stablecoin.mint(address(this), amountToMint);
         }
-        if (amountToDistribute > 0) {
-            stakingVault.deposit(amountToDistribute);
+        if (amountToStakers > 0) {
+            stakingVault.deposit(amountToStakers);
+        }
+        if (amountToTreasury > 0) {
+            treasuryVault.deposit(amountToTreasury);
         }
         if (callerReward > 0) {
             stablecoin.safeTransfer(msg.sender, callerReward);
@@ -398,13 +424,13 @@ contract Bank is ReentrancyGuard, Ownable {
         }
 
         lastHarvested = block.timestamp;
-        totalHarvested += stablecoinHarvested;
-        totalRealizedHarvest += stablecoinHarvested - amountToBurn;
+        totalHarvested += amountHarvested;
         emit LiquidityRewardsCollected(
             msg.sender,
-            stablecoinHarvested,
+            amountHarvested,
             amountToMint,
-            amountToDistribute,
+            amountToStakers,
+            amountToTreasury,
             amountToBurn,
             callerReward
         );
@@ -420,27 +446,68 @@ contract Bank is ReentrancyGuard, Ownable {
         require(amount > 0, "Amount must be > 0");
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
+        
+        uint256 amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR);
+        uint256 amountToStakers = amount - amountToBurn;
 
-        // if nothing is staked, burn the whole donation.
-        // otherwise, burn by stablecoinBurnRatioBps
-        uint256 amountToBurn = amount;
-        if (stakingVault.totalStaked() > 0) {
-            amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
+        uint256 amountToTreasury = Math.mulDiv(amountToStakers, treasuryAllocationBps, BPS_DENOMINATOR);
+        amountToStakers -= amountToTreasury;
+
+        if (stakingVault.totalStaked() == 0) {
+            amountToBurn += amountToStakers;
+            amountToStakers = 0;
         }
-        uint256 amountToDeposit = amount - amountToBurn;
 
+        if (amountToStakers > 0) {
+            stakingVault.deposit(amountToStakers);
+        }
+        if (amountToTreasury > 0) {
+            treasuryVault.deposit(amountToTreasury);
+        }
         if (amountToBurn > 0) {
             _burnStablecoin(amountToBurn, BurnReason.Policy);
         }
-        if (amountToDeposit > 0) {
-            stakingVault.deposit(amountToDeposit);
-        }
 
         // mint a comically large amount of memecoins to reward the donor with.
-        uint256 memecoinsMinted = amount * memecoinMultiplier;
-        memecoin.mint(msg.sender, memecoinsMinted);
+        uint256 memecoinToMint = amount * memecoinMultiplier;
+        memecoin.mint(msg.sender, memecoinToMint);
 
-        emit Donation(msg.sender, amount, amountToBurn, amountToDeposit, memecoinsMinted);
+        emit Donation(
+            msg.sender,
+            amount,
+            amountToStakers,
+            amountToTreasury,
+            amountToBurn,
+            memecoinToMint
+        );
+    }
+
+    function returnStablecoinToBank(uint256 amount) external {
+        require(amount > 0, "amount must be > 0");
+        require(msg.sender == address(treasuryVault), "only treasury vault can return to bank");
+
+        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
+
+        uint256 amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR);
+        uint256 amountToStakers = amount - amountToBurn;
+
+        if (stakingVault.totalStaked() == 0) {
+            amountToBurn += amountToStakers;
+            amountToStakers = 0;
+        }
+
+        if (amountToStakers > 0) {
+            stakingVault.deposit(amountToStakers);
+        }
+        if (amountToBurn > 0) {
+            _burnStablecoin(amountToBurn, BurnReason.Policy);
+        }
+
+        emit StablecoinReturnedFromTreasury(
+            amount,
+            amountToStakers,
+            amountToBurn
+        );
     }
 
     function _burnStablecoin(uint256 amount, BurnReason reason) internal {
@@ -642,6 +709,8 @@ contract StakingVault is ReentrancyGuard {
 
     function deposit(uint256 amount) external nonReentrant {
         require(totalStaked > 0, "Nothing is staked");
+        require(amount > 0, "amount must be > 0");
+        require(msg.sender == bank, "only bank can deposit");
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
         rewardPerShare += Math.mulDiv(amount, DECIMALS, totalStaked);
         emit Deposited(msg.sender, amount, rewardPerShare);
@@ -658,6 +727,34 @@ contract StakingVault is ReentrancyGuard {
         debt = rewardDebt[user];
         uint256 accumulated = (staked * rewardPerShare) / DECIMALS;
         pending = accumulated > debt ? accumulated - debt : 0;
+    }
+}
+
+contract TreasuryVault is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
+
+    IERC20 internal immutable stablecoin;
+    Bank internal immutable bank;
+
+    event Deposited(uint256 amount);
+    event Returned(uint256 amount);
+
+    constructor(address owner, IERC20 _stablecoin, address _bank) Ownable(owner) {
+        stablecoin = _stablecoin;
+        bank = Bank(_bank);
+    }
+
+    function returnToBank(uint256 amount) external onlyOwner nonReentrant {
+        require(amount > 0, "amount must be > 0");
+        bank.returnStablecoinToBank(amount);
+        emit Returned(amount);
+    }
+
+    function deposit(uint256 amount) external nonReentrant {
+        require(amount > 0, "amount must be > 0");
+        require(msg.sender == address(bank), "only bank can deposit");
+        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
+        emit Deposited(amount);
     }
 }
 
