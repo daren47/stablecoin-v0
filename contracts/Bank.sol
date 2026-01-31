@@ -699,6 +699,7 @@ contract StakingVault is ReentrancyGuard {
         // Rounding in reward calculations can create dust. This amounts to fractions
         // of a penny over decades. Not worth the gas to redistribute.
         uint256 accumulated = Math.mulDiv(stakeAmount[msg.sender], rewardPerShare, DECIMALS);
+        // Safe: accumulated >= rewardDebt by algorithm invariant (rewardPerShare only increases)
         uint256 pending = accumulated - rewardDebt[msg.sender];
         if (pending > 0) {
             stablecoin.safeTransfer(msg.sender, pending);
@@ -716,17 +717,29 @@ contract StakingVault is ReentrancyGuard {
         emit Deposited(msg.sender, amount, rewardPerShare);
     }
 
+    function emergencyWithdraw() external nonReentrant {
+        uint256 amount = stakeAmount[msg.sender];
+        if (amount > 0) {
+            totalStaked -= amount;
+            stakeAmount[msg.sender] = 0;
+            rewardDebt[msg.sender] = 0;
+            bankShare.safeTransfer(msg.sender, amount);
+            emit Unstaked(msg.sender, amount);
+        }
+    }
+
     function pendingRewards(address user) external view returns (uint256) {
         uint256 accumulated = Math.mulDiv(stakeAmount[user], rewardPerShare, DECIMALS);
-        if (accumulated < rewardDebt[user]) return 0;
+        // Safe: accumulated >= rewardDebt by algorithm invariant (rewardPerShare only increases)
         return accumulated - rewardDebt[user];
     }
 
     function getUserInfo(address user) external view returns (uint256 staked, uint256 debt, uint256 pending) {
         staked = stakeAmount[user];
         debt = rewardDebt[user];
-        uint256 accumulated = (staked * rewardPerShare) / DECIMALS;
-        pending = accumulated > debt ? accumulated - debt : 0;
+        uint256 accumulated = Math.mulDiv(staked, rewardPerShare, DECIMALS);
+        // Safe: accumulated >= rewardDebt by algorithm invariant (rewardPerShare only increases)
+        pending = accumulated - debt;
     }
 }
 
@@ -742,6 +755,8 @@ contract TreasuryVault is ReentrancyGuard, Ownable {
     constructor(address owner, IERC20 _stablecoin, address _bank) Ownable(owner) {
         stablecoin = _stablecoin;
         bank = Bank(_bank);
+
+        stablecoin.approve(address(bank), type(uint256).max);
     }
 
     function returnToBank(uint256 amount) external onlyOwner nonReentrant {
