@@ -26,10 +26,10 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 library Uni4All {
     using StateLibrary for IPoolManager;
 
-    IUniversalRouter public constant ROUTER = IUniversalRouter(0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af);
-    IPoolManager public constant POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
-    IPositionManager public constant POSITION_MANAGER = IPositionManager(0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e);
-    IAllowanceTransfer constant PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+    IUniversalRouter internal constant ROUTER = IUniversalRouter(0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af);
+    IPoolManager internal constant POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
+    IPositionManager internal constant POSITION_MANAGER = IPositionManager(0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e);
+    IAllowanceTransfer internal constant PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
     function approveRouter(address token) internal {
         IERC20(token).approve(address(PERMIT2), type(uint256).max);
@@ -112,7 +112,7 @@ library Uni4All {
         POOL_MANAGER.initialize(poolKey, startingPrice);
     }
 
-    function initializePool(PoolKey memory poolKey, uint160 startingPrice) public {
+    function initializePool(PoolKey memory poolKey, uint160 startingPrice) internal {
         POOL_MANAGER.initialize(poolKey, startingPrice);
     }
 
