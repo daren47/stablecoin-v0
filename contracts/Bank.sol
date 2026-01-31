@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0
+// SPDX-License-Identifier: MIT
+// Depends on Uniswap v4 (BUSL-1.1)
 
 pragma solidity 0.8.28;
 

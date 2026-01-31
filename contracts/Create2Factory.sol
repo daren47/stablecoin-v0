@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+
+pragma solidity ^0.8.28;
 
 /// @notice Allows any EOA to deploy arbitrary init-code via CREATE2
 contract Create2Factory {
