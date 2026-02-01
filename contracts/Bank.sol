@@ -581,7 +581,7 @@ contract Bank is ReentrancyGuard, Ownable {
         emit StablecoinBurned(amount, reason);
     }
 
-    function burnMemecoin(uint256 amount) public {
+    function burnMemecoin(uint256 amount) external {
         if (amount == 0) revert AmountZero();
         memecoin.burnFrom(msg.sender, amount);
         emit MemecoinBurned(msg.sender, amount);
