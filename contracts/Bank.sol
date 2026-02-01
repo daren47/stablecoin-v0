@@ -52,7 +52,7 @@ contract BankERC20 is ERC20 {
         _mint(to, amount);
     }
 
-    function burn(uint256 amount) external {
+    function burn(uint256 amount) external onlyBank {
         _burn(msg.sender, amount);
     }
 
@@ -392,6 +392,7 @@ contract Bank is ReentrancyGuard, Ownable {
             // Either choice is defensible. We've chosen option 2 here.
             Uni4All.swapTokens(address(bankShare), address(stablecoin), uint128(bankShareBalance), poolKey);
         }
+
         uint256 stablecoinBalanceAfterHarvest = stablecoin.balanceOf(address(this));
 
         // If the pool needs rebalancing, calling harvestFees() forces a rebalance.
@@ -406,40 +407,38 @@ contract Bank is ReentrancyGuard, Ownable {
             );
         }
 
-        uint256 burnRatioToApplyBps = stablecoinBurnRatioBps;
-        uint256 maxBurnRatioBps = BPS_DENOMINATOR - callerRewardBps; // burn must leave room for caller
-        if (burnRatioToApplyBps > maxBurnRatioBps) {
-            burnRatioToApplyBps = maxBurnRatioBps;
+        // split harvested funds
+        uint256 amountHarvested  = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;
+        uint256 callerReward     = Math.mulDiv(amountHarvested, callerRewardBps, BPS_DENOMINATOR);
+        uint256 amountToTreasury = Math.mulDiv(amountHarvested, treasuryAllocationBps, BPS_DENOMINATOR);
+        uint256 amountToBurn     = Math.mulDiv(amountHarvested, stablecoinBurnRatioBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
+
+        // ensure burn doesn't exceed available funds
+        uint256 remaining = amountHarvested - callerReward - amountToTreasury;
+        if (amountToBurn > remaining) {
+            amountToBurn = remaining;
         }
 
-        uint256 amountHarvested = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;
-        uint256 callerReward = Math.mulDiv(amountHarvested, callerRewardBps, BPS_DENOMINATOR);
-        uint256 amountToBurn = Math.mulDiv(amountHarvested, burnRatioToApplyBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
-        uint256 amountToStakers = amountHarvested - callerReward - amountToBurn;
+        uint256 amountToStakers = remaining - amountToBurn;
 
-        // check if the protocol is overcollateralized above targetCollateralRatioBps.
-        // if it is, mint stablecoin to bring the collateral ratio down to targetCollateralRatioBps,
-        // and distribute to stakers.
-        // Note that we don't apply stablecoinBurnRatio here, because the intent is to
-        // bring collateral ratio down to exactly targetCollateralRatioBps, and distribute
-        // the newly minted stablecoin to stakers. Burning some would make no sense.
+        // mint stablecoin if overcollateralized; send to stakers/treasury according to treasuryAllocationBps
         uint256 stablecoinSupply = redeemableStablecoinSupply();
         uint256 supplyAtTargetRatio = Math.mulDiv(valueOfCollateral(), BPS_DENOMINATOR, targetCollateralRatioBps);
         uint256 amountToMint = 0;
         if (supplyAtTargetRatio > stablecoinSupply) {
             amountToMint = supplyAtTargetRatio - stablecoinSupply;
-            amountToStakers += amountToMint;
+            uint256 amountOfMintToTreasury = Math.mulDiv(amountToMint, treasuryAllocationBps, BPS_DENOMINATOR);
+            amountToTreasury += amountOfMintToTreasury;
+            amountToStakers += (amountToMint - amountOfMintToTreasury);
         }
 
-        uint256 amountToTreasury = Math.mulDiv(amountToStakers, treasuryAllocationBps, BPS_DENOMINATOR);
-        amountToStakers -= amountToTreasury;
-
-        // if nothing is staked, don't send anything to the staking vault -- burn it instead.
+        // handle edge case: no stakers
         if (amountToStakers > 0 && stakingVault.totalStaked() == 0) {
             amountToBurn += amountToStakers;
             amountToStakers = 0;
         }
 
+        // execute distributions
         if (amountToMint > 0) {
             stablecoin.mint(address(this), amountToMint);
         }
@@ -479,12 +478,11 @@ contract Bank is ReentrancyGuard, Ownable {
         if (amount == 0) revert AmountZero();
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
-        
-        uint256 amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR);
-        uint256 amountToStakers = amount - amountToBurn;
 
-        uint256 amountToTreasury = Math.mulDiv(amountToStakers, treasuryAllocationBps, BPS_DENOMINATOR);
-        amountToStakers -= amountToTreasury;
+        uint256 amountToTreasury = Math.mulDiv(amount, treasuryAllocationBps, BPS_DENOMINATOR);
+        uint256 amountToStakers = amount - amountToTreasury;
+        uint256 amountToBurn = Math.mulDiv(amountToStakers, stablecoinBurnRatioBps, BPS_DENOMINATOR);
+        amountToStakers -= amountToBurn;
 
         if (stakingVault.totalStaked() == 0) {
             amountToBurn += amountToStakers;
@@ -764,6 +762,7 @@ contract StakingVault is ReentrancyGuard {
         emit Deposited(msg.sender, amount, rewardPerShare);
     }
 
+    // withdraw without collecting rewards. EMERGENCY ONLY
     function emergencyWithdraw() external nonReentrant {
         uint256 amount = stakeAmount[msg.sender];
         if (amount > 0) {
