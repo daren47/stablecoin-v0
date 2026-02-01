@@ -56,6 +56,10 @@ contract BankERC20 is ERC20 {
         _burn(msg.sender, amount);
     }
 
+    function burnFrom(address from, uint256 amount) external onlyBank {
+        _burn(from, amount);
+    }
+
     function decimals() public pure override returns (uint8) {
         return 18;
     }
@@ -202,6 +206,7 @@ contract Bank is ReentrancyGuard, Ownable {
     event StablecoinMinted(address indexed user, uint256 collateralDeposited, uint256 stablesMinted);
     event StablecoinRedeemed(address indexed user, uint256 stablesBurned, uint256 collateralReturned);
     event StablecoinBurned(uint256 amount, BurnReason reason);
+    event MemecoinBurned(address indexed user, uint256 amount);
     event LiquidityRewardsCollected(
         address indexed caller,
         uint256 amountHarvestedFromPool,
@@ -549,6 +554,12 @@ contract Bank is ReentrancyGuard, Ownable {
         }
         stablecoin.burn(amount);
         emit StablecoinBurned(amount, reason);
+    }
+
+    function burnMemecoin(uint256 amount) public {
+        if (amount == 0) revert AmountZero();
+        memecoin.burnFrom(msg.sender, amount);
+        emit MemecoinBurned(msg.sender, amount);
     }
 
     // --------------------
