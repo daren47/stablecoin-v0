@@ -101,6 +101,10 @@ contract Bank is ReentrancyGuard, Ownable {
     uint256 public constant DECIMALS = 1e18;
     uint256 public constant BPS_DENOMINATOR = 10_000;
 
+    // liquidity pool parameters
+    uint24 public constant UNISWAP_POOL_FEE = 3000;
+    int24 public constant UNISWAP_TICK_SPACING = 60;
+
     // Total number of bank shares minted to seed the liquidity pool.
     // These are the only bank shares that will ever be minted.
     uint256 public constant TOTAL_SHARE_SUPPLY = 100000 * DECIMALS;
@@ -143,10 +147,10 @@ contract Bank is ReentrancyGuard, Ownable {
     uint256 public treasuryAllocationBps = 2000;
 
     // Users can donate() to the bank in exchange for a "memecoin"
-    // Designed for gamification and community engagement. Protocol operators can:
+    // Intended for gamification and community engagement. Protocol operators can:
     //   - Create leaderboards for top donors
-    //   - Build games, virtual real estate, "1 million pixels" grids, etc using
-    //     memecoin as currency
+    //   - Build games, virtual real estate, etc using memecoin as currency
+    //     -> incentivizes minting memecoin -> more revenue for protocol
     // Not redeemable for collateral - purely for fun/community
     uint256 public constant MAX_MEMECOIN_MULTIPLIER_BPS = 10000;
     // invariant: memecoinMultiplier <= MAX_MEMECOIN_MULTIPLIER
@@ -162,17 +166,6 @@ contract Bank is ReentrancyGuard, Ownable {
     uint256 public constant MAX_REDEMPTION_FEE_BPS = 100;
     // invariant: redemptionFeeBps <= MAX_REDEMPTION_FEE_BPS
     uint256 public redemptionFeeBps = 5;
-
-    // Uniswap Liquidity position parameters
-    // Liquidity position maintains a +- 50% range around current spot price
-    // Repositions to current spot price when liquidity center is more than 10% away from spot price
-    // Tick range around current tick (approx +- 50% in price for tickSpacing=60)
-    int24 public constant TICK_RANGE = 4080;
-    // Rebalance when current tick drifts this far from position center (approx 10%)
-    int24 public constant REBALANCE_THRESHOLD = 960;
-
-    uint24 public constant UNISWAP_POOL_FEE = 3000;
-    int24 public constant UNISWAP_TICK_SPACING = 60;
 
     // --------------------
     // System state
@@ -303,8 +296,8 @@ contract Bank is ReentrancyGuard, Ownable {
             poolKey,
             uint128(IERC20(Currency.unwrap(poolKey.currency0)).balanceOf(address(this))),
             uint128(IERC20(Currency.unwrap(poolKey.currency1)).balanceOf(address(this))),
-            -TICK_RANGE,
-            TICK_RANGE
+            TickMath.minUsableTick(UNISWAP_TICK_SPACING),
+            TickMath.maxUsableTick(UNISWAP_TICK_SPACING)
         );
 
         poolInitialized = true;
@@ -399,18 +392,6 @@ contract Bank is ReentrancyGuard, Ownable {
         }
 
         uint256 stablecoinBalanceAfterHarvest = stablecoin.balanceOf(address(this));
-
-        // If the pool needs rebalancing, calling harvestFees() forces a rebalance.
-        if (Uni4All.poolNeedsRebalancing(poolKey, tokenId, REBALANCE_THRESHOLD)) {
-            tokenId = Uni4All.rebalanceLiquidityPosition(
-                stablecoin,
-                bankShare,
-                tokenId,
-                poolKey,
-                UNISWAP_TICK_SPACING,
-                TICK_RANGE
-            );
-        }
 
         // split harvested funds
         uint256 amountHarvested  = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;

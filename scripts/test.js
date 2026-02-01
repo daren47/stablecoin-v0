@@ -412,7 +412,7 @@ async function main() {
     poolStablecoinBefore = await stablecoin.balanceOf(POOL_MANAGER);
     poolBankShareBefore = await bankShare.balanceOf(POOL_MANAGER);
     await doSwap(dev, stablecoinAddress, bankShareAddress, "45000", hookAddress, swapHelper);
-    await doSwap(dev, bankShareAddress, stablecoinAddress, "30000", hookAddress, swapHelper);
+    await doSwap(dev, bankShareAddress, stablecoinAddress, "20000", hookAddress, swapHelper);
     devStablecoinAfter = await stablecoin.balanceOf(devAddress);
     devBankShareAfter = await bankShare.balanceOf(devAddress);
     poolStablecoinAfter = await stablecoin.balanceOf(POOL_MANAGER);
@@ -439,8 +439,6 @@ async function main() {
     aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
     let stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
     let totalBurnedBefore = await bank.stablecoinBurnedByPolicy();
-    let tokenIdBefore = await bank.tokenId();
-    let [tickLowerBefore, tickUpperBefore, liquidityBefore] = await bank.getPositionInfo();
     tx = await bank.connect(alice).harvestFees();
     tx.wait();
     stablecoinSupplyAfter = await stablecoin.totalSupply();
@@ -450,8 +448,6 @@ async function main() {
     aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
     let stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
     let totalBurnedAfter = await bank.stablecoinBurnedByPolicy();
-    let tokenIdAfter = await bank.tokenId();
-    let [tickLowerAfter, tickUpperAfter, liquidityAfter] = await bank.getPositionInfo();
     deltaRow("total harvested:", totalHarvestedBefore, totalHarvestedAfter);
     deltaRow("amount burned:", totalBurnedBefore, totalBurnedAfter);
     deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
@@ -459,18 +455,11 @@ async function main() {
     deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
     deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
     deltaRow("collateral ratio (bps):", collateralRatioBefore, collateralRatioAfter, false);
-    deltaRow("LP tokenId:", tokenIdBefore, tokenIdAfter, false);
-    deltaRow("LP tickLower:", tickLowerBefore, tickLowerAfter, false);
-    deltaRow("LP tickUpper:", tickUpperBefore, tickUpperAfter, false);
     expect(
-        tokenIdAfter > tokenIdBefore &&
         stablecoinSupplyAfter < stablecoinSupplyBefore &&
-        // When token order is reversed, increasing price corresponds to decreasing ticks.
-        tickLowerAfter < tickLowerBefore &&
-        tickUpperAfter < tickUpperBefore &&
         stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
         aliceStablecoinAfter > aliceStablecoinBefore,
-        "caller rewarded; fees to vault; stablecoin burned; LP rebalanced",
+        "caller rewarded; fees to vault; stablecoin burned",
         ""
     )
     console.log("");
@@ -501,15 +490,13 @@ async function main() {
     expect(targetCollateralRatioAfter == 9900, "target ratio set", "");
     console.log("");
 
-    console.log("[harvest] policy mint (overcollateralized, no fees generated since last harvest)");
+    console.log("[harvest] policy mint (overcollateralized)");
     stablecoinSupplyBefore = await stablecoin.totalSupply();
     redeemableSupplyBefore = await bank.redeemableStablecoinSupply();
     totalHarvestedBefore = await bank.totalHarvested();
     collateralRatioBefore = await bank.collateralRatio();
     aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
     stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
-    tokenIdBefore = await bank.tokenId();
-    [tickLowerBefore, tickUpperBefore, liquidityBefore] = await bank.getPositionInfo();
     tx = await bank.connect(alice).harvestFees();
     tx.wait();
     stablecoinSupplyAfter = await stablecoin.totalSupply();
@@ -518,9 +505,7 @@ async function main() {
     collateralRatioAfter = await bank.collateralRatio();
     aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
     stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
-    tokenIdAfter = await bank.tokenId();
-    [tickLowerAfter, tickUpperAfter, liquidityAfter] = await bank.getPositionInfo();
-    row("fees accumulated:", fmt(totalHarvestedAfter - totalHarvestedBefore));
+    deltaRow("total harvested:", totalHarvestedBefore, totalHarvestedAfter);
     deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
     deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
     row("target ratio (bps):", targetCollateralRatioAfter);
