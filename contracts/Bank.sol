@@ -396,7 +396,7 @@ contract Bank is ReentrancyGuard, Ownable {
         uint256 stablecoinBalanceAfterHarvest = stablecoin.balanceOf(address(this));
 
         // If the pool needs rebalancing, calling harvestFees() forces a rebalance.
-        if (poolNeedsRebalancing()) {
+        if (Uni4All.poolNeedsRebalancing(poolKey, tokenId, REBALANCE_THRESHOLD)) {
             tokenId = Uni4All.rebalanceLiquidityPosition(
                 stablecoin,
                 bankShare,
@@ -559,19 +559,6 @@ contract Bank is ReentrancyGuard, Ownable {
         return OracleLib.getLatestPrice();
     }
 
-    function poolNeedsRebalancing() public view returns (bool) {
-        (, int24 currentPoolTick, ,) = StateLibrary.getSlot0(POOL_MANAGER, poolKey.toId());
-        int256 widerPoolTick = int256(currentPoolTick);
-        (, PositionInfo info) = POSITION_MANAGER.getPoolAndPositionInfo(tokenId);
-        int24 positionTickLower = PositionInfoLibrary.tickLower(info);
-        int24 positionTickUpper = PositionInfoLibrary.tickUpper(info); 
-        // positionTickLower and positionTickUpper are guaranteed to be multiples
-        // of 60 since 60 is the tick spacing of the pool, so their addition must be
-        // divisible by 2.
-        int256 positionCenterTick = (int256(positionTickLower) + int256(positionTickUpper)) / 2;
-        return abs(widerPoolTick - positionCenterTick) > REBALANCE_THRESHOLD;
-    }
-
     function collateralRatio() public view returns (uint256) {
         uint256 supply = redeemableStablecoinSupply();
         if (supply == 0) return type(uint256).max; // infinite if no supply
@@ -664,14 +651,6 @@ contract Bank is ReentrancyGuard, Ownable {
         uint256 oldAllocation = treasuryAllocationBps;
         treasuryAllocationBps = allocation;
         emit TreasuryAllocationUpdated(msg.sender, oldAllocation, allocation);
-    }
-
-    // --------------------
-    // Pure helpers
-    // --------------------
-
-    function abs(int256 x) public pure returns (int256) {
-        return x >= 0 ? x : -x;
     }
 }
 

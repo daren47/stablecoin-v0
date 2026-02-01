@@ -24,9 +24,11 @@ import {IAllowanceTransfer} from "@uniswap/v4-periphery/lib/permit2/src/interfac
 import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 library Uni4All {
     using StateLibrary for IPoolManager;
+    using PositionInfoLibrary for *;
 
     IUniversalRouter internal constant ROUTER = IUniversalRouter(0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af);
     IPoolManager internal constant POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
@@ -312,6 +314,27 @@ library Uni4All {
             abi.encode(actions, params),
             block.timestamp + 60
         );
+    }
+
+    function poolNeedsRebalancing(
+        PoolKey memory poolKey,
+        uint256 tokenId,
+        int24 rebalanceThreshold
+    ) internal view returns (bool) {
+        (, int24 currentPoolTick, ,) = StateLibrary.getSlot0(POOL_MANAGER, poolKey.toId());
+        int256 widerPoolTick = int256(currentPoolTick);
+        (, PositionInfo info) = POSITION_MANAGER.getPoolAndPositionInfo(tokenId);
+        int24 positionTickLower = PositionInfoLibrary.tickLower(info);
+        int24 positionTickUpper = PositionInfoLibrary.tickUpper(info);
+        // positionTickLower and positionTickUpper are guaranteed to be multiples
+        // of 60 since 60 is the tick spacing of the pool, so their addition must be
+        // divisible by 2.
+        int256 positionCenterTick = (int256(positionTickLower) + int256(positionTickUpper)) / 2;
+        return abs(widerPoolTick - positionCenterTick) > rebalanceThreshold;
+    }
+
+    function abs(int256 x) public pure returns (int256) {
+        return x >= 0 ? x : -x;
     }
 
     function _roundTick(int24 currentTick, int24 tickSpacing) internal pure returns (int24) {

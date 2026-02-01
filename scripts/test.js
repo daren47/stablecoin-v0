@@ -557,7 +557,6 @@ async function main() {
 /*
   console.log("\nDev calling rebalance().");
   console.log("Current pool tick:", await bank.getPoolInfo());
-  console.log("Bank needs rebalancing:", await bank.poolNeedsRebalancing());
   console.log("Token ID before rebalance:", await bank.token_id());
   [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
   console.log("Position info before rebalance:", tick_lower, tick_upper, liquidity);
@@ -593,7 +592,6 @@ async function main() {
     console.log("Alice calling harvest fees. some stablecoin should be burned, as we are below reserve requirement.");
     console.log("stablecoin supply before harvesting:", ethers.formatUnits(await stablecoin.totalSupply()));
     console.log("Current pool tick:", await bank.getPoolInfo());
-    console.log("Bank needs rebalancing:", await bank.poolNeedsRebalancing());
     tx = await bank.connect(alice).harvestFees();
     console.log("stablecoin supply after harvesting:", ethers.formatUnits(await stablecoin.totalSupply()));
     console.log("Alice calling claim(). Alice should receive some rewards.");
@@ -608,7 +606,6 @@ async function main() {
     console.log("Dev MONA balance:", ethers.formatUnits(await stablecoin.balanceOf(devAddress)));
     console.log("Dev LISA balance:", ethers.formatUnits(await bankShare.balanceOf(devAddress)));
     console.log("Current pool tick:", await bank.getPoolInfo());
-    console.log("Bank needs rebalancing:", await bank.poolNeedsRebalancing());
     await wait();
     console.log("Alice calling harvestFees(), bank should rebalance.");
     console.log("Token ID before harvest:", await bank.tokenId());
@@ -623,7 +620,6 @@ async function main() {
     [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
     console.log("Position info after harvest:", tick_lower, tick_upper, liquidity);
     console.log("Current pool tick:", await bank.getPoolInfo());
-    console.log("Bank needs rebalancing:", await bank.poolNeedsRebalancing());
     console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
     console.log("\n");
 
@@ -641,7 +637,6 @@ async function main() {
   [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
   console.log("Position info after harvest:", tick_lower, tick_upper, liquidity);
   console.log("Current pool tick:", await bank.getPoolInfo());
-  console.log("Bank needs rebalancing:", await bank.poolNeedsRebalancing());
   console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
   console.log("\n");
  */
