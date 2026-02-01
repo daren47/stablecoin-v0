@@ -31,18 +31,24 @@ import {Uni4All} from "./Uni4All.sol";
 import {OracleLib} from "./OracleLib.sol";
 
 contract BankERC20 is ERC20 {
-    address internal immutable bank;
+    address public immutable bank;
+
+    error OnlyBank();
+
+    modifier onlyBank() {
+        if (msg.sender != bank) revert OnlyBank();
+        _;
+    }
 
     constructor(
         address bankAddress,
-        string memory name_,
-        string memory symbol_
-    ) ERC20(name_, symbol_) {
+        string memory name,
+        string memory symbol
+    ) ERC20(name, symbol) {
         bank = bankAddress;
     }
 
-    function mint(address to, uint256 amount) external {
-        require(msg.sender == bank, "Forbidden");
+    function mint(address to, uint256 amount) external onlyBank {
         _mint(to, amount);
     }
 
@@ -55,7 +61,6 @@ contract BankERC20 is ERC20 {
     }
 }
 
-/// @notice The Central Bank of MONA. Mints and redeems stablecoins, manages system liquidity.
 contract Bank is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
     using SafeERC20 for BankERC20;
@@ -72,7 +77,7 @@ contract Bank is ReentrancyGuard, Ownable {
     // Reference implementation uses tBTC as collateral.
     // The protocol is collateral-agnostic; production collateral is intended
     // to be GENIUS-compliant, low-volatility tokenized U.S. T-bills.
-    address internal constant DEMO_COLLATERAL_ASSET_ADDRESS = 0x18084fbA666a33d37592fA2633fD49a74DD93a88;
+    address public constant DEMO_COLLATERAL_ASSET_ADDRESS = 0x18084fbA666a33d37592fA2633fD49a74DD93a88;
     IPoolManager public constant POOL_MANAGER = IPoolManager(0x000000000004444c5dc75cB358380D2e3dE08A90);
     IPositionManager public constant POSITION_MANAGER = IPositionManager(0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e);
 
@@ -80,7 +85,7 @@ contract Bank is ReentrancyGuard, Ownable {
     // Core system assets
     // --------------------
 
-    IERC20 private immutable collateralAsset;
+    IERC20 public immutable collateralAsset;
     BankERC20 public immutable bankShare;
     BankERC20 public immutable stablecoin;
     BankERC20 public immutable memecoin;
@@ -133,7 +138,15 @@ contract Bank is ReentrancyGuard, Ownable {
     // invariant: treasuryAllocationBps <= MAX_TREASURY_ALLOCATION_BPS
     uint256 public treasuryAllocationBps = 2000;
 
-    uint256 public memecoinMultiplier = 1000;
+    // Users can donate() to the bank in exchange for a "memecoin"
+    // Designed for gamification and community engagement. Protocol operators can:
+    //   - Create leaderboards for top donors
+    //   - Build games, virtual real estate, "1 million pixels" grids, etc using
+    //     memecoin as currency
+    // Not redeemable for collateral - purely for fun/community
+    uint256 public constant MAX_MEMECOIN_MULTIPLIER_BPS = 10000;
+    // invariant: memecoinMultiplier <= MAX_MEMECOIN_MULTIPLIER
+    uint256 public memecoinMultiplierBps = 1000;
 
     // minting and burning need to charge a small fee to discourage oracle lag arbitrage.
     // the operator of the protocol can adjust these freely up to the MAX_MINT_FEE (set
@@ -170,16 +183,16 @@ contract Bank is ReentrancyGuard, Ownable {
     // Liquidity pool state
     // --------------------
 
-    uint256 public tokenId = 0; // tokenId of current liquidity position
-    bool private poolInitialized = false;
     PoolKey public poolKey;
+    uint256 public tokenId = 0; // tokenId of current liquidity position
+    bool public poolInitialized = false;
 
     // --------------------
-    // Vault
+    // Vaults
     // --------------------
 
     StakingVault public immutable stakingVault;
-    TreasuryVault internal immutable treasuryVault;
+    TreasuryVault public immutable treasuryVault;
 
     // --------------------
     // Events
@@ -217,6 +230,27 @@ contract Bank is ReentrancyGuard, Ownable {
     event MintFeeUpdated(address indexed caller, uint256 oldFeeBps, uint256 newFeeBps);
     event RedemptionFeeUpdated(address indexed caller, uint256 oldFeeBps, uint256 newFeeBps);
     event CallerRewardUpdated(address indexed caller, uint256 oldRewardBps, uint256 newRewardBps);
+    event TreasuryAllocationUpdated(address indexed caller, uint256 oldAllocationBps, uint256 newAllocationBps);
+
+    // --------------------
+    // Errors
+    // --------------------
+
+    error OnlyTreasuryVault();
+    error OutOfRange();
+    error AmountZero();
+    error Expired();
+    error PoolAlreadyInitialized();
+    error PriceBoundViolated();
+
+    // --------------------
+    // Modifiers
+    // --------------------
+
+    modifier onlyTreasuryVault() {
+        if (msg.sender != address(treasuryVault)) revert OnlyTreasuryVault();
+        _;
+    }
 
     // --------------------
     // Protocol initialization
@@ -224,8 +258,8 @@ contract Bank is ReentrancyGuard, Ownable {
 
     constructor() Ownable(msg.sender) {
         collateralAsset = IERC20(DEMO_COLLATERAL_ASSET_ADDRESS);
-        stablecoin = new BankERC20(address(this), "MONA", "MONA");
-        bankShare = new BankERC20(address(this), "LISA", "LISA");
+        stablecoin = new BankERC20(address(this), "STABLE", "STABLE");
+        bankShare = new BankERC20(address(this), "SHARE", "SHARE");
         memecoin = new BankERC20(address(this), "MEME", "MEME");
         stakingVault = new StakingVault(address(this), stablecoin, bankShare);
         treasuryVault = new TreasuryVault(msg.sender, stablecoin, address(this));
@@ -249,7 +283,7 @@ contract Bank is ReentrancyGuard, Ownable {
     }
 
     function initializeLiquidityPool(address poolHooks) public {
-        require(!poolInitialized, "Pool already initialized");
+        if (poolInitialized) revert PoolAlreadyInitialized();
 
         poolKey = Uni4All.initializePool(
             stablecoin,
@@ -285,12 +319,12 @@ contract Bank is ReentrancyGuard, Ownable {
         nonReentrant
         returns (uint256) 
     {
-        require(amountToMint > 0, "Amount must be > 0");
-        require(block.timestamp <= deadline, "Expired");
+        if (amountToMint == 0) revert AmountZero();
+        if (block.timestamp > deadline) revert Expired();
 
         // round up
         uint256 amountToDeposit = Math.mulDiv(amountToMint, DECIMALS, getPrice(), Math.Rounding.Ceil);
-        require(amountToDeposit <= maxAmountIn, "Oracle/slippage");
+        if (amountToDeposit > maxAmountIn) revert PriceBoundViolated();
 
         // pull exactly that much collateral
         collateralAsset.safeTransferFrom(msg.sender, address(this), amountToDeposit);
@@ -312,15 +346,15 @@ contract Bank is ReentrancyGuard, Ownable {
         nonReentrant
         returns (uint256) 
     {
-        require(amountToRedeem > 0, "Amount must be > 0");
-        require(block.timestamp <= deadline, "Expired");
+        if (amountToRedeem == 0) revert AmountZero();
+        if (block.timestamp > deadline) revert Expired();
 
         // Round down
         uint256 withdrawalAmount = Math.mulDiv(amountToRedeem, DECIMALS, getPrice(), Math.Rounding.Floor);
 
         // apply redemption fee
         withdrawalAmount = Math.mulDiv(withdrawalAmount, BPS_DENOMINATOR - redemptionFeeBps, BPS_DENOMINATOR);
-        require(withdrawalAmount >= minAmountOut, "Oracle/slippage");
+        if (withdrawalAmount < minAmountOut) revert PriceBoundViolated();
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amountToRedeem);
 
@@ -359,8 +393,6 @@ contract Bank is ReentrancyGuard, Ownable {
             Uni4All.swapTokens(address(bankShare), address(stablecoin), uint128(bankShareBalance), poolKey);
         }
         uint256 stablecoinBalanceAfterHarvest = stablecoin.balanceOf(address(this));
-        // stablecoinBalanceAfterHarvest should always be greater than stablecoinBalanceBeforeHarvest
-        require(stablecoinBalanceAfterHarvest >= stablecoinBalanceBeforeHarvest, "Harvest decreased balance");
 
         // If the pool needs rebalancing, calling harvestFees() forces a rebalance.
         if (poolNeedsRebalancing()) {
@@ -444,7 +476,7 @@ contract Bank is ReentrancyGuard, Ownable {
      *      partially burned according to policy and the remainder distributed to stakers.
      */
     function donate(uint256 amount) external nonReentrant {
-        require(amount > 0, "Amount must be > 0");
+        if (amount == 0) revert AmountZero();
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
         
@@ -470,7 +502,7 @@ contract Bank is ReentrancyGuard, Ownable {
         }
 
         // mint a comically large amount of memecoins to reward the donor with.
-        uint256 memecoinToMint = amount * memecoinMultiplier;
+        uint256 memecoinToMint = amount * memecoinMultiplierBps;
         memecoin.mint(msg.sender, memecoinToMint);
 
         emit Donation(
@@ -483,9 +515,8 @@ contract Bank is ReentrancyGuard, Ownable {
         );
     }
 
-    function returnStablecoinToBank(uint256 amount) external nonReentrant {
-        require(amount > 0, "amount must be > 0");
-        require(msg.sender == address(treasuryVault), "only treasury vault can return to bank");
+    function returnStablecoinToBank(uint256 amount) external onlyTreasuryVault nonReentrant {
+        if (amount == 0) revert AmountZero();
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
 
@@ -589,45 +620,52 @@ contract Bank is ReentrancyGuard, Ownable {
     // --------------------
 
     function setTargetCollateralRatio(uint256 ratio) external onlyOwner {
-        require(ratio >= MIN_TARGET_COLLATERAL_RATIO_BPS, "Out of range");
+        if (ratio < MIN_TARGET_COLLATERAL_RATIO_BPS) revert OutOfRange();
         uint256 oldRatio = targetCollateralRatioBps;
         targetCollateralRatioBps = ratio;
         emit TargetCollateralRatioUpdated(msg.sender, oldRatio, ratio);
     }
 
     function setStablecoinBurnRatio(uint256 ratio) external onlyOwner {
-        require(ratio <= BPS_DENOMINATOR, "Out of range");
+        if (ratio > BPS_DENOMINATOR) revert OutOfRange();
         uint256 oldRatio = stablecoinBurnRatioBps;
         stablecoinBurnRatioBps = ratio;
         emit StablecoinBurnRatioUpdated(msg.sender, oldRatio, ratio);
     }
 
     function setMemecoinMultiplier(uint256 multiplier) external onlyOwner {
-        require(multiplier > 0, "Out of range");
-        uint256 oldMultiplier = memecoinMultiplier;
-        memecoinMultiplier = multiplier;
+        if (multiplier == 0 || multiplier > MAX_MEMECOIN_MULTIPLIER_BPS) revert OutOfRange();
+        uint256 oldMultiplier = memecoinMultiplierBps;
+        memecoinMultiplierBps = multiplier;
         emit MemecoinMultiplierUpdated(msg.sender, oldMultiplier, multiplier);
     }
 
     function setRedemptionFee(uint256 fee) external onlyOwner {
-        require(fee <= MAX_REDEMPTION_FEE_BPS, "Out of range");
+        if (fee > MAX_REDEMPTION_FEE_BPS) revert OutOfRange();
         uint256 oldFee = redemptionFeeBps;
         redemptionFeeBps = fee;
         emit RedemptionFeeUpdated(msg.sender, oldFee, fee);
     }
 
     function setMintFee(uint256 fee) external onlyOwner {
-        require(fee <= MAX_MINT_FEE_BPS, "Out of range");
+        if (fee > MAX_MINT_FEE_BPS) revert OutOfRange();
         uint256 oldFee = mintFeeBps;
         mintFeeBps = fee;
         emit MintFeeUpdated(msg.sender, oldFee, fee);
     }
 
     function setCallerReward(uint256 reward) external onlyOwner {
-        require(reward <= MAX_CALLER_REWARD_BPS, "Out of range");
+        if (reward > MAX_CALLER_REWARD_BPS) revert OutOfRange();
         uint256 oldReward = callerRewardBps;
         callerRewardBps = reward;
         emit CallerRewardUpdated(msg.sender, oldReward, reward);
+    }
+
+    function setTreasuryAllocation(uint256 allocation) external onlyOwner {
+        if (allocation > MAX_TREASURY_ALLOCATION_BPS) revert OutOfRange();
+        uint256 oldAllocation = treasuryAllocationBps;
+        treasuryAllocationBps = allocation;
+        emit TreasuryAllocationUpdated(msg.sender, oldAllocation, allocation);
     }
 
     // --------------------
@@ -642,7 +680,7 @@ contract Bank is ReentrancyGuard, Ownable {
 contract StakingVault is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    uint256 internal constant DECIMALS = 1e18;
+    uint256 public constant DECIMALS = 1e18;
 
     uint256 public totalStaked = 0;
     uint256 public rewardPerShare = 0;
@@ -650,15 +688,23 @@ contract StakingVault is ReentrancyGuard {
     mapping(address => uint256) public stakeAmount;
     mapping(address => uint256) public rewardDebt;
 
-    IERC20 internal immutable stablecoin;
-    IERC20 internal immutable bankShare;
+    IERC20 public immutable stablecoin;
+    IERC20 public immutable bankShare;
 
-    address internal immutable bank;
+    address public immutable bank;
 
     event Claimed(address indexed user, uint256 reward);
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount);
     event Deposited(address indexed from, uint256 amount, uint256 rewardPerShare);
+
+    error OnlyBank();
+    error AmountZero();
+
+    modifier onlyBank() {
+        if (msg.sender != bank) revert OnlyBank();
+        _;
+    }
 
     constructor(address _bank, IERC20 _stablecoin, IERC20 _bankShare) {
         bank = _bank;
@@ -667,7 +713,8 @@ contract StakingVault is ReentrancyGuard {
     }
 
     function stake(uint256 amount) external nonReentrant {
-        require(amount > 0, "Amount must be > 0");
+        if (amount == 0) revert AmountZero();
+
         _claim();
 
         bankShare.safeTransferFrom(msg.sender, address(this), amount);
@@ -680,7 +727,8 @@ contract StakingVault is ReentrancyGuard {
     }
 
     function unstake(uint256 amount) external nonReentrant {
-        require(amount > 0 && stakeAmount[msg.sender] >= amount, "Invalid unstake");
+        if (amount == 0) revert AmountZero();
+
         _claim();
 
         stakeAmount[msg.sender] -= amount;
@@ -709,10 +757,8 @@ contract StakingVault is ReentrancyGuard {
         rewardDebt[msg.sender] = accumulated;
     }
 
-    function deposit(uint256 amount) external nonReentrant {
-        require(totalStaked > 0, "Nothing is staked");
-        require(amount > 0, "amount must be > 0");
-        require(msg.sender == bank, "only bank can deposit");
+    function deposit(uint256 amount) external onlyBank nonReentrant {
+        if (amount == 0 || totalStaked == 0) revert AmountZero();
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
         rewardPerShare += Math.mulDiv(amount, DECIMALS, totalStaked);
         emit Deposited(msg.sender, amount, rewardPerShare);
@@ -747,11 +793,19 @@ contract StakingVault is ReentrancyGuard {
 contract TreasuryVault is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
-    IERC20 internal immutable stablecoin;
-    Bank internal immutable bank;
+    IERC20 public immutable stablecoin;
+    Bank public immutable bank;
 
     event Deposited(uint256 amount);
     event Returned(uint256 amount);
+
+    error OnlyBank();
+    error AmountZero();
+
+    modifier onlyBank() {
+        if (msg.sender != address(bank)) revert OnlyBank();
+        _;
+    }
 
     constructor(address owner, IERC20 _stablecoin, address _bank) Ownable(owner) {
         stablecoin = _stablecoin;
@@ -761,14 +815,13 @@ contract TreasuryVault is ReentrancyGuard, Ownable {
     }
 
     function returnToBank(uint256 amount) external onlyOwner nonReentrant {
-        require(amount > 0, "amount must be > 0");
+        if (amount == 0) revert AmountZero();
         bank.returnStablecoinToBank(amount);
         emit Returned(amount);
     }
 
-    function deposit(uint256 amount) external nonReentrant {
-        require(amount > 0, "amount must be > 0");
-        require(msg.sender == address(bank), "only bank can deposit");
+    function deposit(uint256 amount) external onlyBank nonReentrant {
+        if (amount == 0) revert AmountZero();
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
         emit Deposited(amount);
     }
@@ -776,6 +829,8 @@ contract TreasuryVault is ReentrancyGuard, Ownable {
 
 contract PoolHooks is BaseHook {
     using StateLibrary for IPoolManager;
+
+    error OnlyBank();
 
     constructor(address _manager) BaseHook(IPoolManager(_manager)) {}
 
@@ -815,7 +870,7 @@ contract PoolHooks is BaseHook {
         bytes calldata
     ) internal view override returns (bytes4) {
         uint128 liquidity = poolManager.getLiquidity(key.toId());
-        require(liquidity == 0, "Only protocol can provide liquidity");
+        if (liquidity > 0) revert OnlyBank();
         return BaseHook.beforeAddLiquidity.selector;
     }
 }
