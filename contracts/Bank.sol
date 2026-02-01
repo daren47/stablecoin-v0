@@ -105,8 +105,8 @@ contract Bank is ReentrancyGuard, Ownable {
     uint24 public constant UNISWAP_POOL_FEE = 3000;
     int24 public constant UNISWAP_TICK_SPACING = 60;
 
-    // Total number of bank shares minted to seed the liquidity pool.
-    // These are the only bank shares that will ever be minted.
+    // Total amount of bankShare minted to seed the liquidity pool.
+    // This is the only bankShare that will ever be minted.
     uint256 public constant TOTAL_SHARE_SUPPLY = 100000 * DECIMALS;
 
     // reward given to the caller of harvestFees() -- caller will receive
@@ -308,6 +308,12 @@ contract Bank is ReentrancyGuard, Ownable {
     // Mint / Redeem
     // --------------------
 
+    /**
+     * @notice Mint stablecoin by depositing collateral.
+     * @dev Minting requires $1 of collateral per stablecoin at the current oracle price,
+     *      plus a protocol fee (mintFeeBps) to discourage oracle lag arbitrage and
+     *      reinforce the protocol's collateral ratio.
+     */
     function mintStablecoin(
         uint256 amountToMint,
         uint256 maxAmountIn,
@@ -335,6 +341,12 @@ contract Bank is ReentrancyGuard, Ownable {
         return amountToMint;
     }
 
+    /**
+     * @notice Redeem stablecoin for collateral.
+     * @dev Each stablecoin redeemed returns $1 of collateral at the current oracle price,
+     *      minus a protocol fee (redemptionFeeBps) to discourage oracle lag arbitrage
+     *      and reinforce the protocol's collateral ratio.
+     */
     function redeemStablecoin(
         uint256 amountToRedeem,
         uint256 minAmountOut,
@@ -368,6 +380,21 @@ contract Bank is ReentrancyGuard, Ownable {
     // Rewards / Policy
     // --------------------
 
+    /**
+     * @notice Harvest liquidity pool fees and apply protocol policy.
+     * @dev Collects fees from the protocol-owned stablecoin/bankShare LP position. Any harvested bankShare
+     *      is swapped to stablecoin (not burned) to preserve pool depth and maximize long-run fee yield.
+     *
+     *      The harvested stablecoin is then allocated according to policy:
+     *        - caller incentive (callerRewardBps),
+     *        - TreasuryVault allocation (treasuryAllocationBps),
+     *        - burn to improve collateral ratio (stablecoinBurnRatioBps),
+     *        - remainder to stakers.
+     *
+     *      If the protocol is overcollateralized relative to targetCollateralRatioBps, additional stablecoin
+     *      is minted and distributed to stakers/treasury to bring redeemable supply up to target.
+     *      If no stakers exist, any staker allocation is burned to avoid stranded value.
+     */
     function harvestFees() external nonReentrant {
         uint256 stablecoinBalanceBeforeHarvest = stablecoin.balanceOf(address(this));
 
@@ -375,19 +402,16 @@ contract Bank is ReentrancyGuard, Ownable {
 
         uint256 bankShareBalance = bankShare.balanceOf(address(this));
         if (bankShareBalance > 0) {
-            // We have two choices here:
-            //   1) burn harvested bankShare
-            //     --makes bankShare deflationary
-            //       -> upward pressure on bankShare price
-            //     --liquidity pool gets thin over time as bankShare is burned
-            //       -> less arbitrage -> less yield to stakers
-            //   2) sell harvested bankShare back into pool for stablecoin
-            //     --bankShare supply remains stable
-            //     --increases yield paid to stakers (via direct distribution of stablecoin
-            //       or by burning the stablecoin to improve collateral ratio)
-            //     --liquidity pool stays stronger over time (bankShare not burned)
-            //       -> more arbitrage -> more yield to stakers
-            // Either choice is defensible. We've chosen option 2 here.
+            // We have two choices here.
+            // (1) Burn bankShare:
+            //     + makes bankShare deflationary (supports price)
+            //     - gradually thins pool depth (less arbitrage / volume) -> lower fee yield
+            // (2) Sell bankShare back into the pool for stablecoin:
+            //     + keeps bankShare supply stable
+            //     + preserves pool depth (supports arbitrage / volume) -> higher long-run fee yield
+            //     + converts fees into stablecoin that can be distributed to stakers and/or burned
+            //       to improve collateral ratio (policy-dependent)
+            // We choose (2) to maximize sustainable yield and maintain pool strength.
             Uni4All.swapTokens(address(bankShare), address(stablecoin), uint128(bankShareBalance), poolKey);
         }
 
@@ -458,7 +482,13 @@ contract Bank is ReentrancyGuard, Ownable {
      * @notice Donate stablecoin to protocol stakers.
      * @dev Intended primarily for protocol-controlled revenue sources (e.g. frontend
      *      fees, vault management fees, or other protocol income). Donated funds are
-     *      partially burned according to policy and the remainder distributed to stakers.
+     *      allocated according to policy: partially burned, distributed to stakers,
+     *      and/or routed to the TreasuryVault (via stablecoinBurnRatioBps and
+     *      treasuryAllocationBps).
+     *
+     *      External users may also donate() in exchange for memecoin, which has no
+     *      intrinsic protocol value but may be used as a general-purpose utility
+     *      token (e.g. games, virtual assets).
      */
     function donate(uint256 amount) external nonReentrant {
         if (amount == 0) revert AmountZero();
@@ -499,6 +529,16 @@ contract Bank is ReentrancyGuard, Ownable {
         );
     }
 
+    /**
+     * @notice Return stablecoin from the TreasuryVault to the protocol
+     * @dev Policy hook for returning excess TreasuryVault profits to the protocol.
+     *      The TreasuryVault provides stablecoin liquidity to AMMs.
+     *      Profits from LP activity may be returned to the Bank via
+     *      returnStablecoinToBank(), which burns a portion according to
+     *      stablecoinBurnRatioBps and distributes the remainder to stakers.
+     *      Only the TreasuryVault may call this function; all other inflows
+     *      should use donate().
+     */
     function returnStablecoinToBank(uint256 amount) external onlyTreasuryVault nonReentrant {
         if (amount == 0) revert AmountZero();
 
@@ -525,6 +565,10 @@ contract Bank is ReentrancyGuard, Ownable {
             amountToBurn
         );
     }
+
+    // --------------------
+    // Burning
+    // --------------------
 
     function _burnStablecoin(uint256 amount, BurnReason reason) internal {
         if (amount == 0) return;
@@ -562,22 +606,21 @@ contract Bank is ReentrancyGuard, Ownable {
         return Math.mulDiv(getPrice(), collateralAsset.balanceOf(address(this)), DECIMALS);
     }
 
+    /**
+     * @notice Supply of redeemable stablecoin
+     * @dev At deployment, TOTAL_SHARE_SUPPLY stablecoin and TOTAL_SHARE_SUPPLY bankShare are minted 1:1
+     *      and deposited into the stablecoin/bankShare liquidity pool at a 1:1 price.
+     *
+     *      The initial stablecoin is not redeemable for collateral because it is permanently paired
+     *      with a fixed supply of bankShare. No additional bankShare can ever be minted, so extracting
+     *      stablecoin from the pool necessarily requires returning bankShare to the pool.
+     *
+     *      BankShare can only be acquired by minting new stablecoin via mintStablecoin() and purchasing
+     *      it from the pool. When bankShare is later sold back into the pool, the seller recovers only
+     *      the stablecoin they previously introduced (per AMM invariants), leaving the initial
+     *      TOTAL_SHARE_SUPPLY stablecoin structurally locked.
+     */
     function redeemableStablecoinSupply() public view returns (uint256) {
-        // At deployment, TOTAL_SHARE_SUPPLY stablecoin and TOTAL_SHARE_SUPPLY bankShare are minted 1:1
-        // and deposited into the stablecoin/bankShare liquidity pool at a 1:1 price. No additional
-        // bankShare will ever be minted; stablecoin are minted by depositing collateral via mintStablecoin().
-        //
-        // The initial stablecoin tokens cannot be redeemed for collateral because they're structurally locked:
-        // extracting them requires bankShare tokens, but all bankShare are also in the pool, and no more
-        // will ever be minted.
-        //
-        // To acquire bankShare, one must first mint stablecoin via mintStablecoin(), and then use that
-        // stablecoin to buy bankShare from the liquidity pool. When they later sell bankShare back
-        // into the pool, the stablecoin they receive is the stablecoin they used to buy the bankShare
-        // (due to AMM math). The initial TOTAL_SHARE_SUPPLY stablecoin remains locked.
-        //
-        // Note: AMM rounding and fee settlement can leave tiny amounts of stablecoin "locked" in the pool.
-        // This approximation is intentionally conservative.
         return stablecoin.totalSupply() - TOTAL_SHARE_SUPPLY;
     }
 
@@ -825,7 +868,7 @@ contract PoolHooks is BaseHook {
 
     /**
      * @notice Enforces that only the protocol can provide liquidity to this pool
-     * @dev Since Uniswap v4 hooks cannot access the original caller (msg.sender is always
+     * @dev Since Uniswap v4 hooks cannot easily access the original caller (msg.sender is always
      *      the PoolManager), we enforce exclusivity by requiring liquidity == 0 before adding.
      *      This works because:
      *      1. The protocol atomically initializes the pool and adds the first liquidity position
