@@ -262,7 +262,7 @@ contract Bank is ReentrancyGuard, Ownable {
         stakingVault = new StakingVault(address(this), stablecoin, bankShare);
         treasuryVault = new TreasuryVault(msg.sender, stablecoin, address(this));
 
-        // These are the only bank shares that will ever be minted.
+        // This is the only bankShare that will ever be minted.
         bankShare.mint(address(this), TOTAL_SHARE_SUPPLY);
         stablecoin.mint(address(this), TOTAL_SHARE_SUPPLY);
 
