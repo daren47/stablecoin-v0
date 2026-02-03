@@ -443,7 +443,7 @@ contract Bank is ReentrancyGuard, Ownable {
         }
 
         // handle edge case: no stakers
-        if (amountToStakers > 0 && stakingVault.totalStaked() == 0) {
+        if (stakingVault.totalStaked() == 0) {
             amountToBurn += amountToStakers;
             amountToStakers = 0;
         }
@@ -496,9 +496,14 @@ contract Bank is ReentrancyGuard, Ownable {
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
 
         uint256 amountToTreasury = Math.mulDiv(amount, treasuryAllocationBps, BPS_DENOMINATOR);
-        uint256 amountToStakers = amount - amountToTreasury;
-        uint256 amountToBurn = Math.mulDiv(amountToStakers, stablecoinBurnRatioBps, BPS_DENOMINATOR);
-        amountToStakers -= amountToBurn;
+        uint256 amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
+
+        uint256 remaining = amount - amountToTreasury;
+        if (amountToBurn > remaining) {
+            amountToBurn = remaining;
+        }
+
+        uint256 amountToStakers = remaining - amountToBurn;
 
         if (stakingVault.totalStaked() == 0) {
             amountToBurn += amountToStakers;
