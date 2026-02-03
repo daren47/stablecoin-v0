@@ -17,7 +17,7 @@ The system consists of:
 * A stablecoin backed by T-Bill exposure
 * A complementary token representing a claim on system yield
 * A "bank" contract that manages minting, redemption, and backing
-* A protocol-owned liquidity vault used to bootstrap and recycle stablecoin market liquidity
+* Protocol-owned vaults used for staking rewards and providing liquidity to open markets
 
 The goal is not novelty, but clarity: to express a familiar financial structure in code and examine its properties.
 
