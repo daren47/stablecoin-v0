@@ -1,275 +1,19 @@
-process.env.HARDHAT_LOGGING_LEVEL = "error";
+const { expect, testResults, fmt, row, deltaRow, resetHardhat,
+  deployContracts, doSwap, POOL_MANAGER } = require("./test-utils.js");
 
 const { ethers, network } = require("hardhat");
 const { MaxUint256 } = require("ethers");
 
-const POOL_MANAGER = "0x000000000004444c5dc75cB358380D2e3dE08A90";
-
-const LABEL_WIDTH = 28
-function row(label, value) {
-  console.log("  " + label.padEnd(LABEL_WIDTH, " ") + value);
-}
-
-function deltaRow(label, before, after, format = true) {
-  let delta = after - before;
-  if (delta < 0) {
-    if (format) {
-      delta = fmt(delta);
-    } else {
-      delta = delta.toString();
-    }
-  } else {
-    if (format) {
-      delta = "+" + fmt(delta);
-    } else {
-      delta = "+" + delta;
-    }
-  }
-  if (format) {
-      before = fmt(before);
-      after = fmt(after);
-  } else {
-      before = before.toString();
-      after = after.toString();
-  }
-  const VALUE_WIDTH = 12;
-
-  const l = label.padEnd(LABEL_WIDTH, " ");
-  const b = before.padEnd(VALUE_WIDTH, " ");
-  const a = after.padEnd(VALUE_WIDTH, " ");
-  const d = delta.padEnd(14, " ");
-
-  console.log(`  ${l}${b}->  ${a}(Δ ${delta})`);
-}
-
-// swap tokenIn for tokenOut using uniswap
-async function doSwap(sender, tokenIn, tokenOut, amount, hookAddress, swapHelper) {
-    let tx = await swapHelper.connect(sender).swapTokens(tokenIn, tokenOut, hookAddress, ethers.parseUnits(amount));
-    await tx.wait()
-}
-
-// uniswap reverts some transactions if they happen within the same block.
-// For example, it reverts if you attempt to swap through a liquidity pool
-// in the same block that it is created.
-// It also reverts if you attempt to withdraw a liquidity position in the
-// same block in which you create it.
-// This function is the hacky way I got execution to pause for long enough
-// for a new block to be mined.
-async function wait() {
-    console.log("Waiting one block...");
-    await ethers.provider.send("evm_mine");
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    await ethers.provider.send("evm_mine");
-    console.log("Done waiting\n.");
-}
-
-// pause execution for a moment, so that you have time to read the helpful text the demo prints :)
-async function pause() {
-    await new Promise(resolve => setTimeout(resolve, 3000));
-}
-
-function fmt(num, decimals = 18, displayDecimals = 4) {
-  const s = ethers.formatUnits(num, decimals);
-  const [i, f = ""] = s.split(".");
-  return f
-    ? `${i}.${f.slice(0, displayDecimals)}`
-    : i;
-}
-
 async function main() {
-    let checks = 0;
-    let passed = 0;
-    let failed = 0;
-
-    function expect(bool, passMsg, failMsg) {
-        checks += 1;
-        if (bool) {
-            passed += 1;
-            console.log("ok:", passMsg);
-        } else {
-            failed += 1;
-            console.log("fail:", failMsg);
-        }
-    }
-
-    console.log("[hardhat] reset\n");
-    await network.provider.request({
-        method: "hardhat_reset",
-        params: [{
-            forking: {
-                jsonRpcUrl: "https://mainnet.infura.io/v3/79d6d784f40348059b19259fe48a779e",
-                blockNumber: 22876667,
-            },
-        }],
-    });
-
-    const [dev, alice, bob] = await ethers.getSigners();
-    const devAddress = await dev.getAddress();
-    const aliceAddress = await alice.getAddress();
-
-    console.log("[deploy] contracts");
-
-    const SwapHelper = await ethers.getContractFactory("SwapHelper");
-    const swapHelper = await SwapHelper.deploy();
-    await swapHelper.waitForDeployment();
-
-    const Bank = await ethers.getContractFactory("Bank");
-    const bank = await Bank.deploy();
-    await bank.waitForDeployment();
-    const bankAddress = await bank.getAddress();
-    row("bank address:", bankAddress);
-
-    const stablecoinAddress = await bank.stablecoin();
-    let tmp = await ethers.getContractFactory("BankERC20");
-    const stablecoin = tmp.attach(stablecoinAddress);
-    row("stablecoin address:", stablecoinAddress);
-
-    const bankShareAddress = await bank.bankShare();
-    tmp = await ethers.getContractFactory("BankERC20");
-    const bankShare = tmp.attach(bankShareAddress);
-    row("bankShare address:", bankShareAddress);
-
-    const stakingVaultAddress = await bank.stakingVault();
-    tmp = await ethers.getContractFactory("StakingVault");
-    const stakingVault = tmp.attach(stakingVaultAddress);
-    row("staking vault address:", stakingVaultAddress);
-
-    const initialStablecoinSupply = await stablecoin.totalSupply();
-    const initialBankShareSupply = await bankShare.totalSupply();
-    const totalShareSupply = await bank.TOTAL_SHARE_SUPPLY();
-    row("TOTAL_SHARE_SUPPLY:", fmt(totalShareSupply));
-    row("stablecoin supply:", fmt(initialStablecoinSupply));
-    row("bankShare supply:", fmt(initialBankShareSupply));
-    expect(initialStablecoinSupply == totalShareSupply && initialBankShareSupply == totalShareSupply,
-        "contracts deployed, coins minted",
-        "initial supply mismatched"
-    )
-    console.log("");
-
-    console.log("[deploy] uniswap v4 hook (create2)");
-    // deploy Create2Factory 
-    const Factory = await ethers.getContractFactory("Create2Factory");
-    const factory = await Factory.deploy();
-    await factory.waitForDeployment();
-    const factoryAddr = await factory.getAddress();
-    const Hook = await ethers.getContractFactory("PoolHooks");
-    const encodedArgs = Hook.interface.encodeDeploy([POOL_MANAGER]);
-    const hookInitCode = Hook.bytecode + encodedArgs.slice(2);
-    const initCodeHash = ethers.keccak256(hookInitCode);
-    // brute-force a salt ending in "840"
-    let saltFound, targetAddress;
-    const desiredBitmap = (1 << 11);  // beforeAddLiquidity
-    const mask14        = (1 << 14) - 1;
-    for (let i = 0; i < 10_000_000; i++) {
-        const hex = i.toString(16).padStart(64, "0");
-        const salt = "0x" + hex;
-        const addr = ethers.getCreate2Address(factoryAddr, salt, initCodeHash);
-        if ((parseInt(addr.slice(-4), 16) & mask14) === desiredBitmap) {
-            saltFound     = salt;
-            targetAddress = addr;
-            row("create2 salt:", salt);
-            row("target address:", targetAddress);
-            break;
-        }
-    }
-    // deploy via CREATE2
-    const hookAddress = await factory.deploy.staticCall(hookInitCode, saltFound);
-    let tx = await factory["deploy(bytes,bytes32)"](hookInitCode, saltFound, {
-        gasLimit: 10_000_000,
-    });
-    receipt = await tx.wait();
-    row("hook deployed:", hookAddress);
-    expect(targetAddress == hookAddress, "hook deployed, address compliant", "incompatible address");
-    console.log("");
-
-    console.log("[initialize] liquidity pool (bank deposits full stablecoin/bankShare balance)");
-    let bankBankShareBalanceBefore = await bankShare.balanceOf(bankAddress);
-    let bankStablecoinBalanceBefore = await stablecoin.balanceOf(bankAddress);
-    let poolBankShareBefore = await bankShare.balanceOf(POOL_MANAGER);
-    let poolStablecoinBefore = await stablecoin.balanceOf(POOL_MANAGER);
-    tx = await bank.connect(dev).initializeLiquidityPool(hookAddress);
-    await tx.wait();
-    let bankBankShareBalanceAfter = await bankShare.balanceOf(bankAddress);
-    let bankStablecoinBalanceAfter = await stablecoin.balanceOf(bankAddress);
-    let poolBankShareAfter = await bankShare.balanceOf(POOL_MANAGER);
-    let poolStablecoinAfter = await stablecoin.balanceOf(POOL_MANAGER);
-    deltaRow("bank bankShare:", bankBankShareBalanceBefore, bankBankShareBalanceAfter);
-    deltaRow("bank stablecoin:", bankStablecoinBalanceBefore, bankStablecoinBalanceAfter);
-    deltaRow("pool bankShare:", poolBankShareBefore, poolBankShareAfter);
-    deltaRow("pool stablecoin:", poolStablecoinBefore, poolStablecoinAfter);
-    expect(
-        bankBankShareBalanceAfter == 0 &&
-        bankStablecoinBalanceAfter == 0 &&
-        poolBankShareAfter == totalShareSupply &&
-        poolStablecoinAfter == totalShareSupply,
-        "pool balances match bank deposits",
-        "liquidity pool initialization failed"
-    )
-    console.log("")
-    //await wait();
-
-    //const block = await ethers.provider.getBlockNumber();
-
-    const tbtc_address = "0x18084fbA666a33d37592fA2633fD49a74DD93a88".toLowerCase(); // mainnet tBTC
-    const tbtc_holder = "0x466C71131278ad54C555489BbfbdAC37E838f99C".toLowerCase();
-
-    await network.provider.send("hardhat_setBalance", [
-        tbtc_holder,
-        ethers.toBeHex(ethers.parseEther("10")),
-    ]);
-
-    await network.provider.request({
-        method: "hardhat_impersonateAccount",
-        params: [tbtc_holder],
-    });
-    const whaleSigner = await ethers.getSigner(tbtc_holder);
-
-    const tbtc = await ethers.getContractAt(
-        [
-            "function balanceOf(address) view returns (uint256)",
-            "function decimals() view returns (uint8)",
-            "function transfer(address to, uint256 amount) returns (bool)",
-            "function transferFrom(address from, address to, uint256 amount) returns (bool)",
-            "function approve(address spender, uint256 amount) returns (bool)",
-            "function allowance(address owner, address spender) view returns (uint256)"
-        ],
-        tbtc_address
-    );
-
-    console.log("[fund] impersonate whale -> seed accounts (tBTC)");
-    row("whale address:", whaleSigner.address);
-    let whaleBalance = await tbtc.balanceOf(whaleSigner.address);
-    row("whale before:", fmt(whaleBalance));
-
-    let amount = ethers.parseUnits("1.0", 18);
-    tx = await tbtc.connect(whaleSigner).transfer(await dev.getAddress(), amount);
-    await tx.wait();
-
-    amount = ethers.parseUnits("0.3", 18);
-    tx = await tbtc.connect(whaleSigner).transfer(await alice.getAddress(), amount);
-    await tx.wait();
-
-    whaleBalance = await tbtc.balanceOf(whaleSigner.address);
-    row("whale after:", fmt(whaleBalance));
-    let devBalance = await tbtc.balanceOf(devAddress);
-    row("dev balance:", fmt(devBalance));
-    let aliceBalance = await tbtc.balanceOf(aliceAddress);
-    row("alice balance:", fmt(aliceBalance));
-    expect(devBalance > 0 && aliceBalance > 0, "dev and alice seeded", "impersonation failed");
-    console.log("");
-
-    await tbtc.connect(dev).approve(bankAddress, MaxUint256);
-    await stablecoin.connect(dev).approve(bankAddress, MaxUint256);
-    await bankShare.connect(dev).approve(bankAddress, MaxUint256);
-    await bankShare.connect(dev).approve(stakingVaultAddress, MaxUint256);
-    await tbtc.connect(alice).approve(bankAddress, MaxUint256);
-    await stablecoin.connect(alice).approve(bankAddress, MaxUint256);
-    await bankShare.connect(alice).approve(bankAddress, MaxUint256);
-    await bankShare.connect(alice).approve(stakingVaultAddress, MaxUint256);
+    await resetHardhat();
+    let [dev, devAddress, alice, aliceAddress, bank, bankAddress,
+        stablecoin, stablecoinAddress, bankShare, bankShareAddress,
+        stakingVault, stakingVaultAddress, treasuryVault, treasuryVaultAddress,
+        swapHelper, swapHelperAddress, hookAddress, tbtc] = await deployContracts();
 
     console.log("[oracle] check tBTC price");
     const tbtcPrice = await bank.getPrice();
-    row("tBTC price:", ethers.formatUnits(tbtcPrice, 18));
+    row("tBTC price:", ethers.formatUnits(tbtcPrice));
     expect(tbtcPrice > 0, "oracle read", "oracle failed");
     console.log("");
 
@@ -438,6 +182,7 @@ async function main() {
     let totalHarvestedBefore = await bank.totalHarvested();
     aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
     let stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    let treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
     let totalBurnedBefore = await bank.stablecoinBurnedByPolicy();
     tx = await bank.connect(alice).harvestFees();
     tx.wait();
@@ -447,19 +192,22 @@ async function main() {
     let totalHarvestedAfter = await bank.totalHarvested();
     aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
     let stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    let treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
     let totalBurnedAfter = await bank.stablecoinBurnedByPolicy();
     deltaRow("total harvested:", totalHarvestedBefore, totalHarvestedAfter);
     deltaRow("amount burned:", totalBurnedBefore, totalBurnedAfter);
     deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
     deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
     deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
     deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
     deltaRow("collateral ratio (bps):", collateralRatioBefore, collateralRatioAfter, false);
     expect(
         stablecoinSupplyAfter < stablecoinSupplyBefore &&
         stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
+        treasuryVaultStablecoinAfter > treasuryVaultStablecoinBefore &&
         aliceStablecoinAfter > aliceStablecoinBefore,
-        "caller rewarded; fees to vault; stablecoin burned",
+        "caller rewarded; fees to vaults; stablecoin burned",
         ""
     )
     console.log("");
@@ -481,6 +229,23 @@ async function main() {
     )
     console.log("");
 
+    console.log("[stake] dev staking bankShare");
+    stakingVaultBankShareBefore = await bankShare.balanceOf(stakingVaultAddress);
+    devBankShareBefore = await bankShare.balanceOf(devAddress);
+    tx = await stakingVault.connect(dev).stake(ethers.parseUnits("2500"));
+    await tx.wait();
+    stakingVaultBankShareAfter = await bankShare.balanceOf(stakingVaultAddress);
+    devBankShareAfter = await bankShare.balanceOf(devAddress);
+    deltaRow("dev bankShare:", devBankShareBefore, devBankShareAfter);
+    deltaRow("staking vault bankShare:", stakingVaultBankShareBefore, stakingVaultBankShareAfter);
+    expect(
+        devBankShareAfter < devBankShareBefore &&
+        stakingVaultBankShareAfter > stakingVaultBankShareBefore,
+        "deltas ok (dev -bankShare, staking vault +bankShare)",
+        "unexpected deltas"
+    )
+    console.log("")
+
     console.log("[set] lower target collateral ratio to 99%");
     let targetCollateralRatioBefore = await bank.targetCollateralRatioBps();
     tx = await bank.setTargetCollateralRatio(9900);
@@ -497,6 +262,7 @@ async function main() {
     collateralRatioBefore = await bank.collateralRatio();
     aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
     stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
     tx = await bank.connect(alice).harvestFees();
     tx.wait();
     stablecoinSupplyAfter = await stablecoin.totalSupply();
@@ -505,6 +271,7 @@ async function main() {
     collateralRatioAfter = await bank.collateralRatio();
     aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
     stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
     deltaRow("total harvested:", totalHarvestedBefore, totalHarvestedAfter);
     deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
     deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
@@ -512,122 +279,156 @@ async function main() {
     row("minted to reach target:", fmt(stablecoinSupplyAfter - stablecoinSupplyBefore));
     deltaRow("collateral ratio (bps):", collateralRatioBefore, collateralRatioAfter, false);
     deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
     expect(
         stablecoinSupplyAfter > stablecoinSupplyBefore &&
         stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
+        stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
         collateralRatioAfter == targetCollateralRatioAfter,
-        "overcollateralized; minted stablecoin to vault (policy)",
+        "overcollateralized; minted stablecoin to vaults (policy)",
         "mint failed"
     )
     console.log("");
-/*
-  console.log("Dev burning MONA to test overcollateralization");
-  console.log("Dev MONA balance before burn:", ethers.formatUnits(await stablecoin.balanceOf(devAddress)));
-  tx = await stablecoin.connect(dev).burn(devAddress, ethers.parseUnits("30000"));
-  receipt = await tx.wait();
-  console.log("Dev MONA balance after burn:", ethers.formatUnits(await stablecoin.balanceOf(devAddress)));
-  console.log("\n");
- */
 
-    console.log("Alice testing overcollateralization rewards");
-    console.log("Bank MONA balance before alice collecting:", ethers.formatUnits(await stablecoin.balanceOf(bankAddress)));
-    console.log("Alice MONA balance before collecting:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    tx = await bank.connect(alice).harvestFees();
+    console.log("[claim] dev claims staking rewards");
+    devStablecoinBefore = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    tx = await stakingVault.connect(dev).claim();
+    await tx.wait();
+    devStablecoinAfter = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    deltaRow("dev stablecoin:", devStablecoinBefore, devStablecoinAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    expect(
+        stakingVaultStablecoinAfter < stakingVaultStablecoinBefore &&
+        devStablecoinAfter > devStablecoinBefore,
+        "dev +stablecoin, staking vault -stablecoin",
+        "claim unsuccessful"
+    );
+    console.log("");
+
+    console.log("[return] treasury vault returning stablecoin to bank");
+    stablecoinSupplyBefore = await stablecoin.totalSupply();
+    treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    tx = await treasuryVault.connect(dev).returnToBank(treasuryVaultStablecoinBefore);
+    await tx.wait();
+    stablecoinSupplyAfter = await stablecoin.totalSupply();
+    treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
+    deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    expect(
+        stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
+        treasuryVaultStablecoinAfter < treasuryVaultStablecoinBefore &&
+        stablecoinSupplyAfter < stablecoinSupplyBefore,
+        "stablecoin burned; stablecoin sent to staking vault",
+        ""
+    );
+    console.log("");
+
+    console.log("[claim] dev claims staking rewards");
+    devStablecoinBefore = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    tx = await stakingVault.connect(dev).claim();
+    await tx.wait();
+    devStablecoinAfter = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    deltaRow("dev stablecoin:", devStablecoinBefore, devStablecoinAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    expect(
+        stakingVaultStablecoinAfter < stakingVaultStablecoinBefore &&
+        devStablecoinAfter > devStablecoinBefore,
+        "dev +stablecoin, staking vault -stablecoin",
+        "claim unsuccessful"
+    );
+    console.log("");
+
+    console.log("[claim] alice claims staking rewards");
+    aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
     tx = await stakingVault.connect(alice).claim();
-    console.log("Bank MONA balance after alice collecting:", ethers.formatUnits(await stablecoin.balanceOf(bankAddress)));
-    console.log("Alice MONA balance after collecting:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    console.log("\n");
+    await tx.wait();
+    aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    expect(
+        stakingVaultStablecoinAfter < stakingVaultStablecoinBefore &&
+        aliceStablecoinAfter > aliceStablecoinBefore,
+        "alice +stablecoin, staking vault -stablecoin",
+        "claim unsuccessful"
+    );
+    console.log("");
 
-/*
-  console.log("\nDev calling rebalance().");
-  console.log("Current pool tick:", await bank.getPoolInfo());
-  console.log("Token ID before rebalance:", await bank.token_id());
-  [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
-  console.log("Position info before rebalance:", tick_lower, tick_upper, liquidity);
-  tx = await bank.connect(alice).harvestFees();
-  console.log("Token ID after rebalance:", await bank.token_id());
-  [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
-  console.log("Position info after rebalance:", tick_lower, tick_upper, liquidity);
-  console.log("Bank MONA balance after rebalance:", ethers.formatUnits(await stablecoin.balanceOf(bankAddress)));
-  console.log("Bank LISA balance after rebalance:", ethers.formatUnits(await bankShare.balanceOf(bankAddress)));
-*/
+    console.log("[donate] dev donates to the protocol");
+    stablecoinSupplyBefore = await stablecoin.totalSupply();
+    devStablecoinBefore = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
+    tx = await bank.connect(dev).donate(ethers.parseUnits("20000"));
+    await tx.wait();
+    stablecoinSupplyAfter = await stablecoin.totalSupply();
+    devStablecoinAfter = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
+    deltaRow("dev stablecoin:", devStablecoinBefore, devStablecoinAfter);
+    deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
+    expect(
+        devStablecoinAfter < devStablecoinBefore &&
+        stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
+        treasuryVaultStablecoinAfter > treasuryVaultStablecoinBefore,
+        "stablecoin sent from dev to staking vault and treasury vault",
+        ""
+    );
+    console.log("");
 
-    console.log("Dev raising collateral requirement.");
-    tx = await bank.connect(dev).setTargetCollateralRatio(15000); // 150%
-    console.log("Dev donating 5000 MONA");
-    console.log("stablecoin supply before donating:", ethers.formatUnits(await stablecoin.totalSupply()));
-    tx = await bank.connect(dev).donate(ethers.parseUnits("5000"));
-    console.log("stablecoin supply after donating:", ethers.formatUnits(await stablecoin.totalSupply()));
-    console.log("alice claiming donated rewards.");
-    console.log("Alice MONA balance before collecting:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    tx = await stakingVault.connect(alice).claim();
-    console.log("Alice MONA balance after collecting:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    console.log("\n");
+    console.log("[stake] dev staking more bankShare");
+    devStablecoinBefore = await stablecoin.balanceOf(devAddress);
+    stakingVaultBankShareBefore = await bankShare.balanceOf(stakingVaultAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    devBankShareBefore = await bankShare.balanceOf(devAddress);
+    tx = await stakingVault.connect(dev).stake(ethers.parseUnits("100"));
+    await tx.wait();
+    devStablecoinAfter = await stablecoin.balanceOf(devAddress);
+    stakingVaultBankShareAfter = await bankShare.balanceOf(stakingVaultAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    devBankShareAfter = await bankShare.balanceOf(devAddress);
+    deltaRow("dev bankShare:", devBankShareBefore, devBankShareAfter);
+    deltaRow("dev stablecoin:", devStablecoinBefore, devStablecoinAfter);
+    deltaRow("staking vault bankShare:", stakingVaultBankShareBefore, stakingVaultBankShareAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    expect(
+        devBankShareAfter < devBankShareBefore &&
+        devStablecoinAfter > devStablecoinBefore &&
+        stakingVaultBankShareAfter > stakingVaultBankShareBefore &&
+        stakingVaultStablecoinAfter < stakingVaultStablecoinBefore,
+        "stake() triggered claim(), dev +stablecoin, staking vault -stablecoin",
+        "unexpected deltas"
+    )
+    console.log("")
 
-    console.log("Alice spending 3000 MONA to buy LISA");
-    console.log("Alice MONA balance before spend:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    await doSwap(alice, stablecoinAddress, bankShareAddress, "3000", hookAddress, swapHelper);
-    console.log("Alice MONA balance after spend:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    console.log("Alice LISA balance after spend:", ethers.formatUnits(await bankShare.balanceOf(aliceAddress)));
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    console.log("\n");
+    console.log("[claim] dev calls claim() again (no rewards accumulated since last claim)");
+    devStablecoinBefore = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
+    tx = await stakingVault.connect(dev).claim();
+    await tx.wait();
+    devStablecoinAfter = await stablecoin.balanceOf(devAddress);
+    stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
+    deltaRow("dev stablecoin:", devStablecoinBefore, devStablecoinAfter);
+    deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
+    expect(
+        stakingVaultStablecoinAfter == stakingVaultStablecoinBefore &&
+        devStablecoinAfter == devStablecoinBefore,
+        "dev received no stablecoin",
+        "claim unsuccessful"
+    );
+    console.log("");
 
-    console.log("Alice calling harvest fees. some stablecoin should be burned, as we are below reserve requirement.");
-    console.log("stablecoin supply before harvesting:", ethers.formatUnits(await stablecoin.totalSupply()));
-    console.log("Current pool tick:", await bank.getPoolInfo());
-    tx = await bank.connect(alice).harvestFees();
-    console.log("stablecoin supply after harvesting:", ethers.formatUnits(await stablecoin.totalSupply()));
-    console.log("Alice calling claim(). Alice should receive some rewards.");
-    console.log("Alice MONA balance before claim:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    tx = await stakingVault.connect(alice).claim();
-    console.log("Alice MONA balance after claim:", ethers.formatUnits(await stablecoin.balanceOf(aliceAddress)));
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    console.log("\n");
-
-    console.log("Dev Spending 15,000 MONA for LISA to force another rebalance");
-    await doSwap(dev, stablecoinAddress, bankShareAddress, "25000", hookAddress, swapHelper);
-    console.log("Dev MONA balance:", ethers.formatUnits(await stablecoin.balanceOf(devAddress)));
-    console.log("Dev LISA balance:", ethers.formatUnits(await bankShare.balanceOf(devAddress)));
-    console.log("Current pool tick:", await bank.getPoolInfo());
-    await wait();
-    console.log("Alice calling harvestFees(), bank should rebalance.");
-    console.log("Token ID before harvest:", await bank.tokenId());
-    [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
-    console.log("Position info before harvest:", tick_lower, tick_upper, liquidity);
-    console.log("Bank balance of MONA:", await stablecoin.balanceOf(bankAddress));
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    tx = await bank.connect(alice).harvestFees();
-    console.log("Token ID after harvest:", await bank.tokenId());
-    console.log("Bank balance of MONA:", await stablecoin.balanceOf(bankAddress));
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
-    console.log("Position info after harvest:", tick_lower, tick_upper, liquidity);
-    console.log("Current pool tick:", await bank.getPoolInfo());
-    console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-    console.log("\n");
-
-/*
-  console.log("Alice calling harvestFees(), bank should rebalance.");
-  console.log("Token ID before harvest:", await bank.token_id());
-  [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
-  console.log("Position info before harvest:", tick_lower, tick_upper, liquidity);
-  console.log("Bank balance of MONA:", await stablecoin.balanceOf(bankAddress));
-  console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-  tx = await bank.connect(alice).harvestFees();
-  console.log("Token ID after harvest:", await bank.token_id());
-  console.log("Bank balance of MONA:", await stablecoin.balanceOf(bankAddress));
-  console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-  [tick_lower, tick_upper, liquidity] = await bank.getPositionInfo();
-  console.log("Position info after harvest:", tick_lower, tick_upper, liquidity);
-  console.log("Current pool tick:", await bank.getPoolInfo());
-  console.log("Bank balance of LISA:", await bankShare.balanceOf(bankAddress));
-  console.log("\n");
- */
-    if (failed > 0) {
-        process.exitCode = 1;
-    }
+    testResults();
 }
 
 main().catch((error) => {

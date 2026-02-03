@@ -22,8 +22,8 @@ async function main() {
   await resetHardhat();
   let [dev, devAddress, alice, aliceAddress, bank, bankAddress,
     stablecoin, stablecoinAddress, bankShare, bankShareAddress,
-    stakingVault, stakingVaultAddress, swapHelper, swapHelperAddress,
-    hookAddress, tbtc] = await deployContracts();
+    stakingVault, stakingVaultAddress, treasuryVault, treasuryVaultAddress,
+    swapHelper, swapHelperAddress, hookAddress, tbtc] = await deployContracts();
 
   console.log("[mint] alice minting stablecoin")
   let stablecoinSupplyBefore = await stablecoin.totalSupply();
@@ -316,7 +316,6 @@ async function main() {
   console.log("");
 
   testResults();
-
 }
 
 main().catch((error) => {

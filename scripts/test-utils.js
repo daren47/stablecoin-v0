@@ -51,21 +51,6 @@ async function doSwap(sender, tokenIn, tokenOut, amount, hookAddress, swapHelper
     await tx.wait()
 }
 
-// uniswap reverts some transactions if they happen within the same block.
-// For example, it reverts if you attempt to swap through a liquidity pool
-// in the same block that it is created.
-// It also reverts if you attempt to withdraw a liquidity position in the
-// same block in which you create it.
-// This function is the hacky way I got execution to pause for long enough
-// for a new block to be mined.
-async function wait() {
-    console.log("Waiting one block...");
-    await ethers.provider.send("evm_mine");
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    await ethers.provider.send("evm_mine");
-    console.log("Done waiting\n.");
-}
-
 function fmt(num, decimals = 18, displayDecimals = 4) {
   const s = ethers.formatUnits(num, decimals);
   const [i, f = ""] = s.split(".");
@@ -90,11 +75,12 @@ function expect(bool, passMsg, failMsg) {
 }
 
 function testResults() {
-    if (passed == checks) {
-        console.log("[pass] " + passed + "/" + checks + " tests passed");
-    } else {
-        console.log("[fail] " + passed + "/" + checks + " tests passed");
-    }
+  if (passed == checks) {
+    console.log("[pass] " + passed + "/" + checks + " tests passed");
+  } else {
+    console.log("[fail] " + passed + "/" + checks + " tests passed");
+    process.exitCode = 1;
+  }
 }
 
 async function resetHardhat() {
@@ -142,6 +128,11 @@ async function deployContracts() {
   tmp = await ethers.getContractFactory("StakingVault");
   const stakingVault = tmp.attach(stakingVaultAddress);
   row("staking vault address:", stakingVaultAddress);
+
+  const treasuryVaultAddress = await bank.treasuryVault();
+  tmp = await ethers.getContractFactory("TreasuryVault");
+  const treasuryVault = tmp.attach(treasuryVaultAddress);
+  row("treasury vault address:", treasuryVaultAddress);
 
   const initialStablecoinSupply = await stablecoin.totalSupply();
   const initialBankShareSupply = await bankShare.totalSupply();
@@ -286,6 +277,7 @@ async function deployContracts() {
   return [dev, devAddress, alice, aliceAddress,
     bank, bankAddress, stablecoin, stablecoinAddress,
     bankShare, bankShareAddress, stakingVault, stakingVaultAddress,
+    treasuryVault, treasuryVaultAddress,
     swapHelper, swapHelperAddress, hookAddress, tbtc
   ];
 }
