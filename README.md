@@ -75,11 +75,13 @@ RPC_URL=your_rpc_url_here
 
 4. Build the Docker image:
 
+*(Note: Docker commands may require sudo depending on your system configuration.)*
+
 ```bash
 npm run build-docker
 ```
 
-5. Start Anvil (forked mainnet):
+5. Start Anvil (via Docker, forked mainnet):
 
 ```bash
 npm run anvil
