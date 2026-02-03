@@ -54,6 +54,7 @@ The repository includes a reproducible local development setup using **Docker**,
 
 ```bash
 git clone https://github.com/daren47/stablecoin-v0.git
+cd stablecoin-v0
 ```
 
 2. Install dependencies
