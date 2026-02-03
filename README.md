@@ -91,7 +91,7 @@ npm run anvil
 npm test
 ```
 
-This will spin up a local chain with forked mainnet state and deploy the full contract system against it.
+This spins up a local Anvil instance forked from mainnet, deploys the full contract system, and runs the integration tests.
 
 ---
 
