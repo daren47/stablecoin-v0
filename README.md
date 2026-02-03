@@ -38,8 +38,14 @@ The repository includes a reproducible local development setup using **Docker**,
 ### Prerequisites
 
 * Node.js (>=18)
+* npm (>=9)
 * Docker
 * An Ethereum RPC URL (e.g. from Alchemy or Infura)
+
+### Tested with
+
+* Node.js 18.x
+* npm 10.x
 
 ### Setup
 
@@ -80,8 +86,7 @@ This will spin up a local chain with forked mainnet state and deploy the full co
 ## Repository structure
 
 * `contracts/` — Solidity contracts implementing the system
-* `test/` — Integration tests against forked mainnet
-* `scripts/` — Deployment and setup scripts
+* `scripts/` — Deployment scripts and integration tests that exercise the full system against forked mainnet state. These tests intentionally include deployment as part of the test flow.
 * `docker/` — Docker configuration for reproducible dev environments
 
 ---
@@ -103,7 +108,7 @@ For a fuller discussion of motivation, assumptions, and tradeoffs, see the white
 
 ## Whitepaper / design notes
 
-* 📄 [Design Notes: A Treasury‑Backed Stablecoin Experiment](./whitepaper.md)
+* [Design Notes: A Treasury‑Backed Stablecoin Experiment](./whitepaper.md)
 
 The whitepaper is short, non‑marketing, and focuses on *why* the system is structured the way it is.
 
