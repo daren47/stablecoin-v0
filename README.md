@@ -49,9 +49,21 @@ The repository includes a reproducible local development setup using **Docker**,
 
 ### Setup
 
-1. Create a `.env` file:
+1. Clone the repository
 
+```bash
+git clone https://github.com/daren47/stablecoin-v0.git
 ```
+
+2. Install dependencies
+
+```bash
+npm install
+```
+
+3. Create a `.env` file:
+
+```bash
 cp .env.example .env
 ```
 
@@ -61,21 +73,21 @@ Copy your RPC URL into it:
 RPC_URL=your_rpc_url_here
 ```
 
-2. Build the Docker image:
+4. Build the Docker image:
 
-```
+```bash
 npm run build-docker
 ```
 
-3. Start Anvil (forked mainnet):
+5. Start Anvil (forked mainnet):
 
-```
+```bash
 npm run anvil
 ```
 
-4. In another terminal, run tests or deploy locally:
+6. In another terminal, run tests or deploy locally:
 
-```
+```bash
 npm test
 ```
 
