@@ -77,7 +77,7 @@ This deploys the full contract system on forked mainnet and runs integration tes
 
 I'm looking for work in the crypto/DeFi space — protocol design, mechanism design, smart contract development.
 
-reach me at: your-burner@whatever.com
+reach me at: darenjames47@gmail.com
 
 ---
 
