@@ -10,7 +10,7 @@ For stablecoin holders, the value proposition is straightforward: every stableco
 
 ## Protocol Equity: Own the Yield
 
-At the heart of the protocol is an **equity token** — a fixed-supply token representing ownership of protocol revenue. It is minted once at deployment and never again. The entire supply is deposited into a Uniswap v4 liquidity pool paired with the protocol's stablecoin, and the protocol retains ownership of the liquidity position.
+At the heart of the protocol is an **equity token**: a fixed-supply token representing ownership of protocol revenue. It is minted once at deployment and never again. The entire supply is deposited into a Uniswap v4 liquidity pool paired with the protocol's stablecoin, and the protocol retains ownership of the liquidity position.
 
 Anyone can buy shares from the pool, and stake them to receive a pro-rata share of all protocol revenue:
 
@@ -21,25 +21,25 @@ Anyone can buy shares from the pool, and stake them to receive a pro-rata share 
 
 The initial pool size is a deliberate design parameter. A smaller initial supply (e.g. 100,000 shares) means early believers can acquire meaningful protocol equity for modest capital. A larger supply raises the cost of early entry. The protocol operator sets this parameter at deployment, transparently defining the incentive structure for early participants.
 
-**An example.** An early participant acquires 5% of the equity supply for a few thousand dollars. The protocol grows to $50M TVL in tokenized T-bills yielding ~5%. That participant now receives 5% of the yield on $50M — roughly $125,000/year — for a modest initial outlay. This is not a speculative token play; it's a claim on real, sustainable yield from U.S. government debt.
+**An example.** An early participant acquires 5% of the equity supply for a few thousand dollars. The protocol grows to $50M TVL in tokenized T-bills yielding ~5%. That participant now receives 5% of the yield on $50M -- roughly $125,000/year -- for a modest initial outlay. This is not a speculative token play; it's a claim on real, sustainable yield from U.S. government debt.
 
 ## How It Works
 
 The protocol consists of a core contract, a staking vault, a treasury vault, and a Uniswap v4 liquidity pool.
 
-**Deployment.** The protocol mints N stablecoin and N equity tokens (where N is the configured initial supply), deposits both into a Uniswap v4 pool at a 1:1 price, and retains the LP position. This initial stablecoin is not counted toward collateral ratio because it cannot be extracted from the pool — all shares begin in the pool, and the only way to withdraw stablecoin is to supply shares, which you can only obtain by first depositing stablecoin. The AMM invariant ensures you never pull out more than you put in.
+**Deployment.** The protocol mints N stablecoin and N equity tokens (where N is the configured initial supply), deposits both into a Uniswap v4 pool at a 1:1 price, and retains the LP position. This initial stablecoin is not counted toward collateral ratio because it cannot be extracted from the pool -- all shares begin in the pool, and the only way to withdraw stablecoin is to supply shares, which you can only obtain by first depositing stablecoin. The AMM invariant ensures you never pull out more than you put in.
 
-**Zero-capital bootstrap.** Because both sides of the liquidity pool are minted by the protocol itself, no initial capital is required to launch. The protocol creates its own deep liquidity pool from nothing — the stablecoin in the pool has no collateral obligation behind it, and the shares in the pool are the entire fixed supply. Real collateral enters the system only when the first user mints stablecoin by depositing T-bills. This means the protocol can launch with a fully functional trading pool on day one, without requiring seed funding or pre-sales.
+**Zero-capital bootstrap.** Because both sides of the liquidity pool are minted by the protocol itself, no initial capital is required to launch. The protocol creates its own deep liquidity pool from nothing -- the stablecoin in the pool has no collateral obligation behind it, and the shares in the pool are the entire fixed supply. Real collateral enters the system only when the first user mints stablecoin by depositing T-bills. This means the protocol can launch with a fully functional trading pool on day one, without requiring seed funding or pre-sales.
 
 **Minting.** A user deposits $1 of tokenized T-bills (at oracle price) and receives 1 stablecoin, minus a small fee. The T-bills are held by the protocol as collateral.
 
 **Redemption.** A user returns stablecoin to the protocol and receives the equivalent value in T-bill collateral, minus a small fee. The returned stablecoin is burned.
 
-**Yield distribution.** Anyone can call `harvestFees()` to trigger fee collection and yield distribution. The caller receives a small reward (default: 50 bps of harvested amount) — this eliminates the need for a keeper bot. Harvested fees are split according to configurable policy: a portion is burned (improving collateral ratio), a portion goes to the treasury vault (for seeding additional liquidity on external AMMs), and the remainder is distributed to stakers.
+**Yield distribution.** Anyone can call `harvestFees()` to trigger fee collection and yield distribution. The caller receives a small reward (default: 50 bps of harvested amount) -- this eliminates the need for a keeper bot. Harvested fees are split according to configurable policy: a portion is burned (improving collateral ratio), a portion goes to the treasury vault (for seeding additional liquidity on external AMMs), and the remainder is distributed to stakers.
 
-At scale, MEV bots will call `harvestFees()` frequently — this is desirable, as it means fees are distributed to stakers consistently. The caller reward is capped to bound the cost per harvest. Alternatively, the harvest function can be restricted to the protocol operator, turning it into a built-in revenue source — the choice between public and restricted harvesting is a business decision, not a technical constraint.
+At scale, MEV bots will call `harvestFees()` frequently -- this is desirable, as it means fees are distributed to stakers consistently. The caller reward is capped to bound the cost per harvest. Alternatively, the harvest function can be restricted to the protocol operator, turning it into a built-in revenue source -- the choice between public and restricted harvesting is a business decision, not a technical constraint.
 
-**Overcollateralization minting.** When T-bill collateral appreciates and the protocol's collateral ratio exceeds the target, new stablecoin is minted during `harvestFees()` to bring the ratio back to target. This newly minted stablecoin is distributed to stakers and the treasury vault — it's the primary mechanism by which T-bill yield reaches equity holders.
+**Overcollateralization minting.** When T-bill collateral appreciates and the protocol's collateral ratio exceeds the target, new stablecoin is minted during `harvestFees()` to bring the ratio back to target. This newly minted stablecoin is distributed to stakers and the treasury vault -- it's the primary mechanism by which T-bill yield reaches equity holders.
 
 **Buying shares.** Users who want protocol equity mint stablecoin (by depositing T-bills), then use that stablecoin to purchase shares from the Uniswap pool. They stake their shares to begin earning yield. This process itself generates trading fees for the protocol.
 
@@ -56,11 +56,11 @@ Every tunable parameter in the protocol is bounded by immutable constants, ensur
 
 ## Open Questions
 
-**Oracle.** The protocol requires a reliable price oracle for the underlying T-bill collateral. The oracle implementation is intentionally stubbed — the appropriate solution depends on which tokenized T-bill product is used as collateral and what on-chain price feeds are available for it. Oracle reliability is the single most critical dependency for the protocol's safety.
+**Oracle.** The protocol requires a reliable price oracle for the underlying T-bill collateral. The oracle implementation is intentionally stubbed -- the appropriate solution depends on which tokenized T-bill product is used as collateral and what on-chain price feeds are available for it. Oracle reliability is the single most critical dependency for the protocol's safety.
 
 **Regulatory classification.** The equity token is likely a security under most current frameworks. The protocol's viability depends on the evolving regulatory landscape for tokenized assets and DeFi participation tokens.
 
-**Collateral access.** It is not yet clear how the general public will acquire tokenized T-bills to deposit into the protocol. Existing products have significant barriers: OpenEden's TBILL is restricted to accredited investors, Ondo's USDY has limited on-chain liquidity, and BlackRock's BUIDL is institutional-only. The protocol assumes a future state where tokenized T-bill products are widely accessible and liquid — a reasonable bet given regulatory momentum (e.g. the GENIUS Act), but not yet a reality, nor a guarantee.
+**Collateral access.** It is not yet clear how the general public will acquire tokenized T-bills to deposit into the protocol. Existing products have significant barriers: OpenEden's TBILL is restricted to accredited investors, Ondo's USDY has limited on-chain liquidity, and BlackRock's BUIDL is institutional-only. The protocol assumes a future state where tokenized T-bill products are widely accessible and liquid -- a reasonable bet given regulatory momentum (e.g. the GENIUS Act), but not yet a reality, nor a guarantee.
 
 **Treasury vault.** The treasury vault is designed to seed external liquidity pools (Curve, Uniswap, etc.) for the stablecoin, increasing its utility and tradability and generating additional yield for the protocol. The full implementation of treasury vault strategy is deferred.
 

@@ -10,7 +10,7 @@ A stablecoin protocol backed by tokenized U.S. Treasury bills, where anyone can 
 
 ## What it is
 
-A stablecoin backed by tokenized T-bills, paired with a fixed-supply equity token. Equity holders stake their tokens and receive a share of all protocol revenue — T-bill yield, liquidity pool fees, and mint/redemption fees. The protocol bootstraps itself with zero initial capital by minting both tokens into a Uniswap v4 liquidity pool that it owns.
+A stablecoin backed by tokenized T-bills, paired with a fixed-supply equity token. Equity holders stake their tokens and receive a share of all protocol revenue -- T-bill yield, liquidity pool fees, and mint/redemption fees. The protocol bootstraps itself with zero initial capital by minting both tokens into a Uniswap v4 liquidity pool that it owns.
 
 ---
 
@@ -61,23 +61,23 @@ npm run anvil
 npm test
 ```
 
-This deploys the full contract system on forked mainnet and runs integration tests covering the complete protocol lifecycle — minting, redemption, swaps, staking, fee harvesting, policy mints, and treasury operations.
+This deploys the full contract system on forked mainnet and runs integration tests covering the complete protocol lifecycle -- minting, redemption, swaps, staking, fee harvesting, policy mints, and treasury operations.
 
 ---
 
 ## Repository structure
 
-* `contracts/` — Solidity contracts
-* `scripts/` — Deployment and integration tests
-* `docker/` — Docker configuration for reproducible dev environments
+* `contracts/` -- Solidity contracts
+* `scripts/` -- Deployment and integration tests
+* `docker/` -- Docker configuration for reproducible dev environments
 
 ---
 
 ## Contact
 
-I'm looking for work in the crypto/DeFi space — protocol design, mechanism design, smart contract development.
+I'm looking for work in the crypto/DeFi space -- protocol design, mechanism design, smart contract development.
 
-reach me at: darenjames47@gmail.com
+Reach me at: darenjames47@gmail.com
 
 ---
 
