@@ -25,7 +25,7 @@ The initial pool size is a deliberate design parameter. A smaller initial supply
 
 The protocol consists of a core contract, a staking vault, a treasury vault, and a Uniswap v4 liquidity pool.
 
-**Deployment.** The protocol mints N stablecoin and N bankShare (where N is the configured initial supply), deposits both into a Uniswap v4 pool at a 1:1 price, and retains the LP position. This initial stablecoin is not counted as redeemable supply because it cannot be extracted from the pool — all bankShare begins in the pool, so the only way to withdraw stablecoin is to supply bankShare, which you can only obtain by first depositing stablecoin. The AMM invariant ensures you never pull out more than you put in.
+**Deployment.** The protocol mints N stablecoin and N bankShare (where N is the configured initial supply), deposits both into a Uniswap v4 pool at a 1:1 price, and retains the LP position. This initial stablecoin is not counted toward collateral ratio because it cannot be extracted from the pool — all bankShare begins in the pool, and the only way to withdraw stablecoin is to supply bankShare, which you can only obtain by first depositing stablecoin. The AMM invariant ensures you never pull out more than you put in. This system allows the protocol to be bootstrapped with no initial capital.
 
 **Minting.** A user deposits $1 of tokenized T-bills (at oracle price) and receives 1 stablecoin, minus a small fee. The T-bills are held by the protocol as collateral.
 
@@ -33,7 +33,7 @@ The protocol consists of a core contract, a staking vault, a treasury vault, and
 
 **Yield distribution.** Anyone can call `harvestFees()` to trigger fee collection and yield distribution. The caller receives a small reward (default: 50 bps of harvested amount) — this eliminates the need for a keeper bot. Harvested fees are split according to configurable policy: a portion is burned (improving collateral ratio), a portion goes to the treasury vault (for seeding additional liquidity on external AMMs), and the remainder is distributed to bankShare stakers.
 
-**Overcollateralization minting.** When T-bill collateral appreciates and the protocol's collateral ratio exceeds the target, new stablecoin is minted to bring the ratio back to target. This newly minted stablecoin is distributed to stakers and the treasury vault — it's the primary mechanism by which T-bill yield reaches bankShare holders.
+**Overcollateralization minting.** When T-bill collateral appreciates and the protocol's collateral ratio exceeds the target, new stablecoin is minted during `harvestFees()` to bring the ratio back to target. This newly minted stablecoin is distributed to stakers and the treasury vault — it's the primary mechanism by which T-bill yield reaches bankShare holders.
 
 **Buying bankShare.** Users who want protocol ownership mint stablecoin (by depositing T-bills), then use that stablecoin to purchase bankShare from the Uniswap pool. They stake their bankShare to begin earning yield. This process itself generates trading fees for the protocol.
 
@@ -60,4 +60,4 @@ Every tunable parameter in the protocol is bounded by immutable constants, ensur
 
 ## Repository
 
-The complete implementation is available at [REPO_LINK]. The protocol is written in Solidity 0.8.28, integrates with Uniswap v4, and uses OpenZeppelin libraries for access control and token safety.
+The complete implementation is available at [https://github.com/daren47/stablecoin-v0]. The protocol is written in Solidity 0.8.28, integrates with Uniswap v4, and uses OpenZeppelin libraries for access control and token safety.
