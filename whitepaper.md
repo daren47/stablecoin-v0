@@ -60,4 +60,4 @@ Every tunable parameter in the protocol is bounded by immutable constants, ensur
 
 ## Repository
 
-The complete implementation is available at [https://github.com/daren47/stablecoin-v0]. The protocol is written in Solidity 0.8.28, integrates with Uniswap v4, and uses OpenZeppelin libraries for access control and token safety.
+The complete implementation is available at [https://github.com/daren47/stablecoin-v0](https://github.com/daren47/stablecoin-v0). The protocol is written in Solidity 0.8.28, integrates with Uniswap v4, and uses OpenZeppelin libraries for access control and token safety.
