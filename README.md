@@ -95,7 +95,7 @@ npm run anvil
 npm test
 ```
 
-This spins up a local Anvil instance forked from mainnet, deploys the full contract system, and runs the integration tests.
+This spins up a local Anvil instance forked from mainnet, deploys the full contract system, and runs the integration tests. The test suite runs a full protocol lifecycle against forked mainnet — minting, redemption, swaps, staking, fee harvesting, policy mints, treasury operations — with balance tracking across all contracts.
 
 ---
 
