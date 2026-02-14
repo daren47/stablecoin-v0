@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 
+// This is *not* a real oracle. It *does* read from chainlink but needs
+// TWAP-weighting, etc. Intentionally incomplete because the author
+// does not want you to deploy this protocol as-written.
+
 pragma solidity 0.8.28;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -35,7 +39,8 @@ library OracleLib {
     address internal constant FEED = 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c;
 
     // Maximum age of a price report
-    uint256 internal constant MAX_STALE_TIME = 15 minutes;
+    // intentionally high. this isn't a real oracle.
+    uint256 internal constant MAX_STALE_TIME = 60 minutes;
     // Scale all prices to 18 decimals
     uint256 internal constant TARGET_DECIMALS = 1e18;
 
@@ -48,9 +53,9 @@ library OracleLib {
 
     /// @dev Internal helper to enforce freshness & validity
     function _validate(int256 answer, uint80 roundId, uint256 updatedAt, uint80 answeredInRound) internal view {
-        //require(answer > 0, "Oracle: invalid price");
-        //require(answeredInRound >= roundId, "Oracle: stale answer");
-        //require(block.timestamp - updatedAt <= MAX_STALE_TIME, "Oracle: stale price");
+        require(answer > 0, "Oracle: invalid price");
+        require(answeredInRound >= roundId, "Oracle: stale answer");
+        require(block.timestamp - updatedAt <= MAX_STALE_TIME, "Oracle: stale price");
     }
 
     /// @notice Fetches the latest BTC/USD price, reverting on any stale or invalid data
