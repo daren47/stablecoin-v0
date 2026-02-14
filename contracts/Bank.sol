@@ -808,6 +808,27 @@ contract StakingVault is ReentrancyGuard {
     }
 }
 
+/**
+ * @notice Vault to hold funds to seed external liquidity pools
+ * @dev For the stablecoin to be useful as a trading route, pools like stablecoin/USDC
+ *      and stablecoin/ETH must exist. The TreasuryVault receives a portion of protocol
+ *      revenue and deploys it to external liquidity pools, capturing fees and either
+ *      redeploying them or returning them to the bank, to be distributed to protocol
+ *      stakers.
+ *
+ *      This is a complex operation and is left unimplemented in this reference implementation.
+ *      Protocol operators could use a Gnosis Safe and manage the funds with a keeper bot,
+ *      or they could directly implement all the functions they need to interact with
+ *      protocols like Uniswap and Curve.
+ *
+ *      Protocol operators could also allow direct staking (of stablecoins) in the vault,
+ *      allowing users to earn yield on stablecoins. Again, this is a complex operation,
+ *      and beyond the scope of this reference implementation.
+ *
+ *      Protocol operators must make their own decisions about what to do -- but it is
+ *      critical for the success of the protocol that pools like stablecoin/USDC and
+ *      stablecoin/ETH exist with deep liquidity.
+ */
 contract TreasuryVault is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
@@ -877,9 +898,8 @@ contract PoolHooks is BaseHook {
      *      the PoolManager), we enforce exclusivity by requiring liquidity == 0 before adding.
      *      This works because:
      *      1. The protocol atomically initializes the pool and adds the first liquidity position
-     *      2. When rebalancing, the protocol removes ALL liquidity and re-adds it in the same transaction
-     *      3. No external party can front-run or insert liquidity during these atomic operations
-     *      4. Therefore, liquidity will only be zero when the protocol is adding/rebalancing
+     *      2. The protocol never removes its initial liquidity position
+     *      3. Thus, liquidity will always be > 0 after pool initialization
      */
     function _beforeAddLiquidity(
         address,
