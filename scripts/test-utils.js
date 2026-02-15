@@ -1,5 +1,3 @@
-process.env.HARDHAT_LOGGING_LEVEL = "error";
-
 const { ethers, network } = require("hardhat");
 const { MaxUint256 } = require("ethers");
 
@@ -44,11 +42,11 @@ function deltaRow(label, before, after, format = true) {
 
 // swap tokenIn for tokenOut using uniswap
 async function doSwap(sender, tokenIn, tokenOut, amount, hookAddress, swapHelper, fmt=true) {
-    if (fmt) {
-        amount = ethers.parseUnits(amount);
-    }
-    let tx = await swapHelper.connect(sender).swapTokens(tokenIn, tokenOut, hookAddress, amount);
-    await tx.wait()
+  if (fmt) {
+    amount = ethers.parseUnits(amount);
+  }
+  let tx = await swapHelper.connect(sender).swapTokens(tokenIn, tokenOut, hookAddress, amount);
+  await tx.wait()
 }
 
 function fmt(num, decimals = 18, displayDecimals = 4) {
