@@ -65,7 +65,7 @@ The protocol operator controls several parameters that shape how the protocol be
 
 **Regulatory classification.** The equity token is likely a security under most current frameworks. The protocol's viability depends on the evolving regulatory landscape for tokenized assets and DeFi participation tokens.
 
-**Collateral access.** It is not yet clear how the general public will acquire tokenized T-bills to deposit into the protocol. Existing products have significant barriers: OpenEden's TBILL is restricted to accredited investors, Ondo's USDY has limited on-chain liquidity, and BlackRock's BUIDL is institutional-only. The protocol assumes a future state where tokenized T-bill products are widely accessible and liquid -- a reasonable bet given regulatory momentum (e.g. the GENIUS Act), but not yet a reality, nor a guarantee.
+**Collateral access.** It is not yet clear how the general public will acquire tokenized T-bills to deposit into the protocol. Existing products have significant barriers: OpenEden's TBILL is restricted to accredited investors, Ondo's USDY has limited DEX liquidity, and BlackRock's BUIDL is institutional-only. The protocol assumes a future state where tokenized T-bill products are widely accessible and liquid -- a reasonable bet given regulatory momentum (e.g. the GENIUS Act), but not yet a reality, nor a guarantee.
 
 **Treasury vault.** The treasury vault is designed to seed external liquidity pools (Curve, Uniswap, etc.) for the stablecoin, increasing its utility and tradability and generating additional yield for the protocol. The full implementation of treasury vault strategy is deferred.
 
