@@ -35,24 +35,31 @@ The protocol consists of a core contract, a staking vault, a treasury vault, and
 
 **Redemption.** A user returns stablecoin to the protocol and receives the equivalent value in T-bill collateral, minus a small fee. The returned stablecoin is burned.
 
+**Buying shares.** Users who want protocol equity mint stablecoin (by depositing T-bills), then use that stablecoin to purchase shares from the Uniswap pool. They stake their shares to begin earning yield. This process itself generates trading fees for the protocol.
+
 **Yield distribution.** Anyone can call `harvestFees()` to trigger fee collection and yield distribution. The caller receives a small reward (default: 50 bps of harvested amount) -- this eliminates the need for a keeper bot. Harvested fees are split according to configurable policy: a portion is burned (improving collateral ratio), a portion goes to the treasury vault (for seeding additional liquidity on external AMMs), and the remainder is distributed to stakers.
 
 At scale, MEV bots will call `harvestFees()` frequently -- this is desirable, as it means fees are distributed to stakers consistently. The caller reward is capped to bound the cost per harvest. Alternatively, the harvest function can be restricted to the protocol operator, turning it into a built-in revenue source -- the choice between public and restricted harvesting is a business decision, not a technical constraint.
 
 **Overcollateralization minting.** When T-bill collateral appreciates and the protocol's collateral ratio exceeds the target, new stablecoin is minted during `harvestFees()` to bring the ratio back to target. This newly minted stablecoin is distributed to stakers and the treasury vault -- it's the primary mechanism by which T-bill yield reaches equity holders.
 
-**Buying shares.** Users who want protocol equity mint stablecoin (by depositing T-bills), then use that stablecoin to purchase shares from the Uniswap pool. They stake their shares to begin earning yield. This process itself generates trading fees for the protocol.
+**Protocol-only liquidity.** A Uniswap v4 hook enforces that only the protocol can provide liquidity to the equity pool, preventing third parties from extracting trading fees or manipulating pool pricing.
 
-## Safety Architecture
+## Policy Levers
 
-Every tunable parameter in the protocol is bounded by immutable constants, ensuring that the protocol operator cannot set values that would endanger the system:
+The protocol operator controls several parameters that shape how the protocol behaves. These are dynamically configurable throughout the lifecycle of the protocol, but each is bounded by an immutable constant to prevent the operator from setting values that could endanger the protocol.
 
-- **Collateral ratio floor.** The target collateral ratio has an immutable minimum, preventing the operator from aggressively minting against thin collateral.
-- **Fee ceilings.** Mint and redemption fees are capped by immutable constants, preventing predatory fee extraction.
-- **Treasury allocation cap.** The treasury vault's share of protocol revenue is bounded, ensuring the majority flows to stakers.
-- **Caller reward cap.** The harvest caller incentive is bounded to prevent excessive extraction.
-- **Burn discipline.** Stablecoin is burned on every redemption and on a configurable portion of harvested yield, providing continuous deflationary pressure that supports the collateral ratio.
-- **Protocol-only liquidity.** A Uniswap v4 hook enforces that only the protocol can provide liquidity to the equity pool, preventing third-party LP positions that could extract value or manipulate the pool.
+**Target collateral ratio.** Determines when overcollateralization minting kicks in. A higher target means the protocol hoards collateral and distributes less yield. A lower target means more stablecoin is minted and more yield flows to stakers. An immutable floor prevents this from ever being set low enough to endanger solvency.
+
+**Stablecoin burn ratio.** Controls what fraction of harvested yield is burned rather than distributed. Burning stablecoin improves the collateral ratio over time, strengthening the peg. Distributing more rewards stakers. The operator balances long-term protocol health against staker yield.
+
+**Treasury allocation.** Controls what fraction of revenue is diverted to the treasury vault for seeding external liquidity pools. More treasury funding means deeper stablecoin liquidity on external AMMs, which makes the stablecoin more useful. Less means more yield to stakers. An immutable cap ensures the majority of revenue always flows to stakers.
+
+**Mint and redemption fees.** Small fees charged on minting and redeeming stablecoin. These exist primarily to discourage oracle lag arbitrage -- if the oracle updates slowly, an attacker could mint or redeem at a stale price for risk-free profit. Higher fees close that window but add friction for legitimate users. Both are capped by immutable constants.
+
+**Caller reward.** The incentive paid to whoever calls `harvestFees()`. A higher reward means more frequent harvests but more value extracted per call. A lower reward means the protocol retains more but harvests may be less frequent. Capped to bound the maximum extraction.
+
+**Protocol-only liquidity.** A Uniswap v4 hook enforces that only the protocol can provide liquidity to the equity pool. This prevents third-party LP positions that could extract trading fees meant for the protocol, or manipulate pool pricing.
 
 ## Open Questions
 
