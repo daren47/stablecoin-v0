@@ -47,7 +47,7 @@ At scale, MEV bots will call `harvestFees()` frequently -- this is desirable, as
 
 ## Policy Levers
 
-The protocol operator controls several parameters that shape how the protocol behaves. These are dynamically configurable throughout the lifecycle of the protocol, but each is bounded by an immutable constant to prevent the operator from setting values that could endanger the protocol.
+The protocol operator controls several parameters that shape how the protocol behaves. These are dynamically configurable throughout the lifecycle of the protocol. Each is bounded by an immutable constant to prevent the operator from setting values that could endanger the protocol.
 
 **Target collateral ratio.** Determines when overcollateralization minting kicks in. A higher target means the protocol hoards collateral and distributes less yield. A lower target means more stablecoin is minted and more yield flows to stakers. An immutable floor prevents this from ever being set low enough to endanger solvency.
 
@@ -57,9 +57,7 @@ The protocol operator controls several parameters that shape how the protocol be
 
 **Mint and redemption fees.** Small fees charged on minting and redeeming stablecoin. These exist primarily to discourage oracle lag arbitrage -- if the oracle updates slowly, an attacker could mint or redeem at a stale price for risk-free profit. Higher fees close that window but add friction for legitimate users. Both are capped by immutable constants.
 
-**Caller reward.** The incentive paid to whoever calls `harvestFees()`. A higher reward means more frequent harvests but more value extracted per call. A lower reward means the protocol retains more but harvests may be less frequent. Capped to bound the maximum extraction.
-
-**Protocol-only liquidity.** A Uniswap v4 hook enforces that only the protocol can provide liquidity to the equity pool. This prevents third-party LP positions that could extract trading fees meant for the protocol, or manipulate pool pricing.
+**Caller reward.** The incentive paid to whoever calls `harvestFees()`. A higher reward means more frequent harvests but more value extracted per call. A lower reward means the protocol retains more yield but harvests may be less frequent. Capped to bound the maximum extraction.
 
 ## Open Questions
 
