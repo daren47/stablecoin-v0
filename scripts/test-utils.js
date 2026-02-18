@@ -127,10 +127,10 @@ async function deployContracts() {
   const stakingVault = tmp.attach(stakingVaultAddress);
   row("staking vault address:", stakingVaultAddress);
 
-  const treasuryVaultAddress = await bank.treasuryVault();
-  tmp = await ethers.getContractFactory("TreasuryVault");
-  const treasuryVault = tmp.attach(treasuryVaultAddress);
-  row("treasury vault address:", treasuryVaultAddress);
+  const liquidityVaultAddress = await bank.liquidityVault();
+  tmp = await ethers.getContractFactory("LiquidityVault");
+  const liquidityVault = tmp.attach(liquidityVaultAddress);
+  row("liquidity vault address:", liquidityVaultAddress);
 
   const initialStablecoinSupply = await stablecoin.totalSupply();
   const initialBankShareSupply = await bankShare.totalSupply();
@@ -204,9 +204,6 @@ async function deployContracts() {
     "liquidity pool initialization failed"
   )
   console.log("")
-  //await wait();
-
-  //const block = await ethers.provider.getBlockNumber();
 
   const tbtcAddress = "0x18084fbA666a33d37592fA2633fD49a74DD93a88".toLowerCase(); // mainnet tBTC
   const tbtcHolder = "0x466C71131278ad54C555489BbfbdAC37E838f99C".toLowerCase();
@@ -275,7 +272,7 @@ async function deployContracts() {
   return [dev, devAddress, alice, aliceAddress,
     bank, bankAddress, stablecoin, stablecoinAddress,
     bankShare, bankShareAddress, stakingVault, stakingVaultAddress,
-    treasuryVault, treasuryVaultAddress,
+    liquidityVault, liquidityVaultAddress,
     swapHelper, swapHelperAddress, hookAddress, tbtc
   ];
 }

@@ -61,7 +61,7 @@ npm run anvil
 npm test
 ```
 
-This deploys the full contract system on forked mainnet and runs integration tests covering the complete protocol lifecycle -- minting, redemption, swaps, staking, fee harvesting, policy mints, and treasury operations.
+This deploys the full contract system on forked mainnet and runs integration tests covering the complete protocol lifecycle -- minting, redemption, swaps, staking, fee harvesting, policy mints, and liquidity operations.
 
 ---
 

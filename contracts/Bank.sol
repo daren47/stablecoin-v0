@@ -134,17 +134,17 @@ contract Bank is ReentrancyGuard, Ownable {
     // invariant: stablecoinBurnRatioBps <= BPS_DENOMINATOR
     uint256 public stablecoinBurnRatioBps = 5000;
 
-    // the protocol redirects treasuryAllocationBps of protocol earnings
+    // the protocol redirects liquidityVaultAllocationBps of protocol earnings
     // (both from protocol-owned liquidity and from appreciation of underlying
-    // collateral) to the TreasuryVault.
-    // The TreasuryVault can:
+    // collateral) to the LiquidityVault.
+    // The LiquidityVault can:
     //   1) send funds back to the bank (to be burned or distributed to stakers)
     //   2) use funds to provide liquidity to pools on uniswap/curve/etc,
     //      increasing the amount of on-chain protocol-owned liquidity.
-    // The TreasuryVault cannot send funds to the operator of the protocol.
-    uint256 public constant MAX_TREASURY_ALLOCATION_BPS = 5000;
-    // invariant: treasuryAllocationBps <= MAX_TREASURY_ALLOCATION_BPS
-    uint256 public treasuryAllocationBps = 2000;
+    // The LiquidityVault cannot send funds to the operator of the protocol.
+    uint256 public constant MAX_LIQUIDITY_VAULT_ALLOCATION_BPS = 5000;
+    // invariant: liquidityVaultAllocationBps <= MAX_LIQUIDITY_VAULT_ALLOCATION_BPS
+    uint256 public liquidityVaultAllocationBps = 2000;
 
     // Users can donate() to the bank in exchange for a "memecoin"
     // Intended for gamification and community engagement. Protocol operators can:
@@ -189,7 +189,7 @@ contract Bank is ReentrancyGuard, Ownable {
     // --------------------
 
     StakingVault public immutable stakingVault;
-    TreasuryVault public immutable treasuryVault;
+    LiquidityVault public immutable liquidityVault;
 
     // --------------------
     // Events
@@ -205,7 +205,7 @@ contract Bank is ReentrancyGuard, Ownable {
         uint256 amountHarvestedFromPool,
         uint256 amountMinted,
         uint256 amountToStakers,
-        uint256 amountToTreasury,
+        uint256 amountToLiquidityVault,
         uint256 amountBurned,
         uint256 amountToCaller
     );
@@ -213,7 +213,7 @@ contract Bank is ReentrancyGuard, Ownable {
         address indexed donor,
         uint256 donationAmount,
         uint256 amountToStakers,
-        uint256 amountToTreasury,
+        uint256 amountToLiquidityVault,
         uint256 amountBurned,
         uint256 memecoinMinted
     );
@@ -228,13 +228,13 @@ contract Bank is ReentrancyGuard, Ownable {
     event MintFeeUpdated(address indexed caller, uint256 oldFeeBps, uint256 newFeeBps);
     event RedemptionFeeUpdated(address indexed caller, uint256 oldFeeBps, uint256 newFeeBps);
     event CallerRewardUpdated(address indexed caller, uint256 oldRewardBps, uint256 newRewardBps);
-    event TreasuryAllocationUpdated(address indexed caller, uint256 oldAllocationBps, uint256 newAllocationBps);
+    event LiquidityVaultAllocationUpdated(address indexed caller, uint256 oldAllocationBps, uint256 newAllocationBps);
 
     // --------------------
     // Errors
     // --------------------
 
-    error OnlyTreasuryVault();
+    error OnlyLiquidityVault();
     error OutOfRange();
     error AmountZero();
     error Expired();
@@ -245,8 +245,8 @@ contract Bank is ReentrancyGuard, Ownable {
     // Modifiers
     // --------------------
 
-    modifier onlyTreasuryVault() {
-        if (msg.sender != address(treasuryVault)) revert OnlyTreasuryVault();
+    modifier onlyLiquidityVault() {
+        if (msg.sender != address(liquidityVault)) revert OnlyLiquidityVault();
         _;
     }
 
@@ -260,7 +260,7 @@ contract Bank is ReentrancyGuard, Ownable {
         bankShare = new BankERC20(address(this), "SHARE", "SHARE");
         memecoin = new BankERC20(address(this), "MEME", "MEME");
         stakingVault = new StakingVault(address(this), stablecoin, bankShare);
-        treasuryVault = new TreasuryVault(msg.sender, stablecoin, address(this));
+        liquidityVault = new LiquidityVault(msg.sender, stablecoin, address(this));
 
         // This is the only bankShare that will ever be minted.
         bankShare.mint(address(this), TOTAL_SHARE_SUPPLY);
@@ -277,7 +277,7 @@ contract Bank is ReentrancyGuard, Ownable {
         Uni4All.approvePositionManager(address(stablecoin));
 
         stablecoin.approve(address(stakingVault), type(uint256).max);
-        stablecoin.approve(address(treasuryVault), type(uint256).max);
+        stablecoin.approve(address(liquidityVault), type(uint256).max);
     }
 
     function initializeLiquidityPool(address poolHooks) public {
@@ -387,7 +387,7 @@ contract Bank is ReentrancyGuard, Ownable {
      *
      *      The harvested stablecoin is then allocated according to policy:
      *        - caller incentive (callerRewardBps),
-     *        - TreasuryVault allocation (treasuryAllocationBps),
+     *        - LiquidityVault allocation (liquidityVaultAllocationBps),
      *        - burn to improve collateral ratio (stablecoinBurnRatioBps),
      *        - remainder to stakers.
      *
@@ -420,25 +420,25 @@ contract Bank is ReentrancyGuard, Ownable {
         // split harvested funds
         uint256 amountHarvested  = stablecoinBalanceAfterHarvest - stablecoinBalanceBeforeHarvest;
         uint256 callerReward     = Math.mulDiv(amountHarvested, callerRewardBps, BPS_DENOMINATOR);
-        uint256 amountToTreasury = Math.mulDiv(amountHarvested, treasuryAllocationBps, BPS_DENOMINATOR);
+        uint256 amountToLiquidityVault = Math.mulDiv(amountHarvested, liquidityVaultAllocationBps, BPS_DENOMINATOR);
         uint256 amountToBurn     = Math.mulDiv(amountHarvested, stablecoinBurnRatioBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
 
         // ensure burn doesn't exceed available funds
-        uint256 remaining = amountHarvested - callerReward - amountToTreasury;
+        uint256 remaining = amountHarvested - callerReward - amountToLiquidityVault;
         if (amountToBurn > remaining) {
             amountToBurn = remaining;
         }
 
         uint256 amountToStakers = remaining - amountToBurn;
 
-        // mint stablecoin if overcollateralized; send to stakers/treasury according to treasuryAllocationBps
+        // mint stablecoin if overcollateralized; send to stakers/treasury according to liquidityVaultAllocationBps
         uint256 stablecoinSupply = redeemableStablecoinSupply();
         uint256 supplyAtTargetRatio = Math.mulDiv(valueOfCollateral(), BPS_DENOMINATOR, targetCollateralRatioBps);
         uint256 amountToMint = 0;
         if (supplyAtTargetRatio > stablecoinSupply) {
             amountToMint = supplyAtTargetRatio - stablecoinSupply;
-            uint256 amountOfMintToTreasury = Math.mulDiv(amountToMint, treasuryAllocationBps, BPS_DENOMINATOR);
-            amountToTreasury += amountOfMintToTreasury;
+            uint256 amountOfMintToTreasury = Math.mulDiv(amountToMint, liquidityVaultAllocationBps, BPS_DENOMINATOR);
+            amountToLiquidityVault += amountOfMintToTreasury;
             amountToStakers += (amountToMint - amountOfMintToTreasury);
         }
 
@@ -455,8 +455,8 @@ contract Bank is ReentrancyGuard, Ownable {
         if (amountToStakers > 0) {
             stakingVault.deposit(amountToStakers);
         }
-        if (amountToTreasury > 0) {
-            treasuryVault.deposit(amountToTreasury);
+        if (amountToLiquidityVault > 0) {
+            liquidityVault.deposit(amountToLiquidityVault);
         }
         if (callerReward > 0) {
             stablecoin.safeTransfer(msg.sender, callerReward);
@@ -472,7 +472,7 @@ contract Bank is ReentrancyGuard, Ownable {
             amountHarvested,
             amountToMint,
             amountToStakers,
-            amountToTreasury,
+            amountToLiquidityVault,
             amountToBurn,
             callerReward
         );
@@ -483,8 +483,8 @@ contract Bank is ReentrancyGuard, Ownable {
      * @dev Intended primarily for protocol-controlled revenue sources (e.g. frontend
      *      fees, vault management fees, or other protocol income). Donated funds are
      *      allocated according to policy: partially burned, distributed to stakers,
-     *      and/or routed to the TreasuryVault (via stablecoinBurnRatioBps and
-     *      treasuryAllocationBps).
+     *      and/or routed to the LiquidityVault (via stablecoinBurnRatioBps and
+     *      liquidityVaultAllocationBps).
      *
      *      External users may also donate() in exchange for memecoin, which has no
      *      intrinsic protocol value but may be used as a general-purpose utility
@@ -495,10 +495,10 @@ contract Bank is ReentrancyGuard, Ownable {
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
 
-        uint256 amountToTreasury = Math.mulDiv(amount, treasuryAllocationBps, BPS_DENOMINATOR);
+        uint256 amountToLiquidityVault = Math.mulDiv(amount, liquidityVaultAllocationBps, BPS_DENOMINATOR);
         uint256 amountToBurn = Math.mulDiv(amount, stablecoinBurnRatioBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
 
-        uint256 remaining = amount - amountToTreasury;
+        uint256 remaining = amount - amountToLiquidityVault;
         if (amountToBurn > remaining) {
             amountToBurn = remaining;
         }
@@ -513,8 +513,8 @@ contract Bank is ReentrancyGuard, Ownable {
         if (amountToStakers > 0) {
             stakingVault.deposit(amountToStakers);
         }
-        if (amountToTreasury > 0) {
-            treasuryVault.deposit(amountToTreasury);
+        if (amountToLiquidityVault > 0) {
+            liquidityVault.deposit(amountToLiquidityVault);
         }
         if (amountToBurn > 0) {
             _burnStablecoin(amountToBurn, BurnReason.Policy);
@@ -528,23 +528,23 @@ contract Bank is ReentrancyGuard, Ownable {
             msg.sender,
             amount,
             amountToStakers,
-            amountToTreasury,
+            amountToLiquidityVault,
             amountToBurn,
             memecoinToMint
         );
     }
 
     /**
-     * @notice Return stablecoin from the TreasuryVault to the protocol
-     * @dev Policy hook for returning excess TreasuryVault profits to the protocol.
-     *      The TreasuryVault provides stablecoin liquidity to AMMs.
+     * @notice Return stablecoin from the LiquidityVault to the protocol
+     * @dev Policy hook for returning excess LiquidityVault profits to the protocol.
+     *      The LiquidityVault provides stablecoin liquidity to AMMs.
      *      Profits from LP activity may be returned to the Bank via
      *      returnStablecoinToBank(), which burns a portion according to
      *      stablecoinBurnRatioBps and distributes the remainder to stakers.
-     *      Only the TreasuryVault may call this function; all other inflows
+     *      Only the LiquidityVault may call this function; all other inflows
      *      should use donate().
      */
-    function returnStablecoinToBank(uint256 amount) external onlyTreasuryVault nonReentrant {
+    function returnStablecoinToBank(uint256 amount) external onlyLiquidityVault nonReentrant {
         if (amount == 0) revert AmountZero();
 
         stablecoin.safeTransferFrom(msg.sender, address(this), amount);
@@ -686,11 +686,11 @@ contract Bank is ReentrancyGuard, Ownable {
         emit CallerRewardUpdated(msg.sender, oldReward, reward);
     }
 
-    function setTreasuryAllocation(uint256 allocation) external onlyOwner {
-        if (allocation > MAX_TREASURY_ALLOCATION_BPS) revert OutOfRange();
-        uint256 oldAllocation = treasuryAllocationBps;
-        treasuryAllocationBps = allocation;
-        emit TreasuryAllocationUpdated(msg.sender, oldAllocation, allocation);
+    function setLiquidityVaultAllocation(uint256 allocation) external onlyOwner {
+        if (allocation > MAX_LIQUIDITY_VAULT_ALLOCATION_BPS) revert OutOfRange();
+        uint256 oldAllocation = liquidityVaultAllocationBps;
+        liquidityVaultAllocationBps = allocation;
+        emit LiquidityVaultAllocationUpdated(msg.sender, oldAllocation, allocation);
     }
 }
 
@@ -811,7 +811,7 @@ contract StakingVault is ReentrancyGuard {
 /**
  * @notice Vault to hold funds to seed external liquidity pools
  * @dev For the stablecoin to be useful as a trading route, pools like stablecoin/USDC
- *      and stablecoin/ETH must exist. The TreasuryVault receives a portion of protocol
+ *      and stablecoin/ETH must exist. The LiquidityVault receives a portion of protocol
  *      revenue and deploys it to external liquidity pools, capturing fees and either
  *      redeploying them or returning them to the bank, to be distributed to protocol
  *      stakers.
@@ -829,7 +829,7 @@ contract StakingVault is ReentrancyGuard {
  *      critical for the success of the protocol that pools like stablecoin/USDC and
  *      stablecoin/ETH exist with deep liquidity.
  */
-contract TreasuryVault is ReentrancyGuard, Ownable {
+contract LiquidityVault is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable stablecoin;

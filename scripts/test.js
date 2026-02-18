@@ -8,7 +8,7 @@ async function main() {
   await resetHardhat();
   let [dev, devAddress, alice, aliceAddress, bank, bankAddress,
     stablecoin, stablecoinAddress, bankShare, bankShareAddress,
-    stakingVault, stakingVaultAddress, treasuryVault, treasuryVaultAddress,
+    stakingVault, stakingVaultAddress, liquidityVault, liquidityVaultAddress,
     swapHelper, swapHelperAddress, hookAddress, tbtc] = await deployContracts();
 
   console.log("[oracle] check tBTC price");
@@ -182,7 +182,7 @@ async function main() {
   let totalHarvestedBefore = await bank.totalHarvested();
   aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
   let stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
-  let treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
+  let liquidityVaultStablecoinBefore = await stablecoin.balanceOf(liquidityVaultAddress);
   let totalBurnedBefore = await bank.stablecoinBurnedByPolicy();
   tx = await bank.connect(alice).harvestFees();
   tx.wait();
@@ -192,20 +192,20 @@ async function main() {
   let totalHarvestedAfter = await bank.totalHarvested();
   aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
   let stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
-  let treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
+  let liquidityVaultStablecoinAfter = await stablecoin.balanceOf(liquidityVaultAddress);
   let totalBurnedAfter = await bank.stablecoinBurnedByPolicy();
   deltaRow("total harvested:", totalHarvestedBefore, totalHarvestedAfter);
   deltaRow("amount burned:", totalBurnedBefore, totalBurnedAfter);
   deltaRow("alice stablecoin:", aliceStablecoinBefore, aliceStablecoinAfter);
   deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
-  deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
+  deltaRow("liquidity vault stablecoin:", liquidityVaultStablecoinBefore, liquidityVaultStablecoinAfter);
   deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
   deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
   deltaRow("collateral ratio (bps):", collateralRatioBefore, collateralRatioAfter, false);
   expect(
     stablecoinSupplyAfter < stablecoinSupplyBefore &&
     stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
-    treasuryVaultStablecoinAfter > treasuryVaultStablecoinBefore &&
+    liquidityVaultStablecoinAfter > liquidityVaultStablecoinBefore &&
     aliceStablecoinAfter > aliceStablecoinBefore,
     "caller rewarded; fees to vaults; stablecoin burned",
     ""
@@ -262,7 +262,7 @@ async function main() {
   collateralRatioBefore = await bank.collateralRatio();
   aliceStablecoinBefore = await stablecoin.balanceOf(aliceAddress);
   stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
-  treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
+  liquidityVaultStablecoinBefore = await stablecoin.balanceOf(liquidityVaultAddress);
   tx = await bank.connect(alice).harvestFees();
   tx.wait();
   stablecoinSupplyAfter = await stablecoin.totalSupply();
@@ -271,7 +271,7 @@ async function main() {
   collateralRatioAfter = await bank.collateralRatio();
   aliceStablecoinAfter = await stablecoin.balanceOf(aliceAddress);
   stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
-  treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
+  liquidityVaultStablecoinAfter = await stablecoin.balanceOf(liquidityVaultAddress);
   deltaRow("total harvested:", totalHarvestedBefore, totalHarvestedAfter);
   deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
   deltaRow("redeemable supply:", redeemableSupplyBefore, redeemableSupplyAfter);
@@ -279,7 +279,7 @@ async function main() {
   row("minted to reach target:", fmt(stablecoinSupplyAfter - stablecoinSupplyBefore));
   deltaRow("collateral ratio (bps):", collateralRatioBefore, collateralRatioAfter, false);
   deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
-  deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
+  deltaRow("liquidity vault stablecoin:", liquidityVaultStablecoinBefore, liquidityVaultStablecoinAfter);
   expect(
     stablecoinSupplyAfter > stablecoinSupplyBefore &&
     stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
@@ -307,21 +307,21 @@ async function main() {
   );
   console.log("");
 
-  console.log("[return] treasury vault returning stablecoin to bank");
+  console.log("[return] liquidity vault returning stablecoin to bank");
   stablecoinSupplyBefore = await stablecoin.totalSupply();
-  treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
+  liquidityVaultStablecoinBefore = await stablecoin.balanceOf(liquidityVaultAddress);
   stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
-  tx = await treasuryVault.connect(dev).returnToBank(treasuryVaultStablecoinBefore);
+  tx = await liquidityVault.connect(dev).returnToBank(liquidityVaultStablecoinBefore);
   await tx.wait();
   stablecoinSupplyAfter = await stablecoin.totalSupply();
-  treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
+  liquidityVaultStablecoinAfter = await stablecoin.balanceOf(liquidityVaultAddress);
   stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
   deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
-  deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
+  deltaRow("liquidity vault stablecoin:", liquidityVaultStablecoinBefore, liquidityVaultStablecoinAfter);
   deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
   expect(
     stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
-    treasuryVaultStablecoinAfter < treasuryVaultStablecoinBefore &&
+    liquidityVaultStablecoinAfter < liquidityVaultStablecoinBefore &&
     stablecoinSupplyAfter < stablecoinSupplyBefore,
     "stablecoin burned; stablecoin sent to staking vault",
     ""
@@ -366,22 +366,22 @@ async function main() {
   stablecoinSupplyBefore = await stablecoin.totalSupply();
   devStablecoinBefore = await stablecoin.balanceOf(devAddress);
   stakingVaultStablecoinBefore = await stablecoin.balanceOf(stakingVaultAddress);
-  treasuryVaultStablecoinBefore = await stablecoin.balanceOf(treasuryVaultAddress);
+  liquidityVaultStablecoinBefore = await stablecoin.balanceOf(liquidityVaultAddress);
   tx = await bank.connect(dev).donate(ethers.parseUnits("20000"));
   await tx.wait();
   stablecoinSupplyAfter = await stablecoin.totalSupply();
   devStablecoinAfter = await stablecoin.balanceOf(devAddress);
   stakingVaultStablecoinAfter = await stablecoin.balanceOf(stakingVaultAddress);
-  treasuryVaultStablecoinAfter = await stablecoin.balanceOf(treasuryVaultAddress);
+  liquidityVaultStablecoinAfter = await stablecoin.balanceOf(liquidityVaultAddress);
   deltaRow("dev stablecoin:", devStablecoinBefore, devStablecoinAfter);
   deltaRow("stablecoin supply:", stablecoinSupplyBefore, stablecoinSupplyAfter);
   deltaRow("staking vault stablecoin:", stakingVaultStablecoinBefore, stakingVaultStablecoinAfter);
-  deltaRow("treasury vault stablecoin:", treasuryVaultStablecoinBefore, treasuryVaultStablecoinAfter);
+  deltaRow("liquidity vault stablecoin:", liquidityVaultStablecoinBefore, liquidityVaultStablecoinAfter);
   expect(
     devStablecoinAfter < devStablecoinBefore &&
     stakingVaultStablecoinAfter > stakingVaultStablecoinBefore &&
-    treasuryVaultStablecoinAfter > treasuryVaultStablecoinBefore,
-    "stablecoin sent from dev to staking vault and treasury vault",
+    liquidityVaultStablecoinAfter > liquidityVaultStablecoinBefore,
+    "stablecoin sent from dev to staking vault and liquidity vault",
     ""
   );
   console.log("");

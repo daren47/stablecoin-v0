@@ -22,7 +22,7 @@ async function main() {
   await resetHardhat();
   let [dev, devAddress, alice, aliceAddress, bank, bankAddress,
     stablecoin, stablecoinAddress, bankShare, bankShareAddress,
-    stakingVault, stakingVaultAddress, treasuryVault, treasuryVaultAddress,
+    stakingVault, stakingVaultAddress, liquidityVault, liquidityVaultAddress,
     swapHelper, swapHelperAddress, hookAddress, tbtc] = await deployContracts();
 
   console.log("[mint] alice minting stablecoin")
